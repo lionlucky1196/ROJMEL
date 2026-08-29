@@ -1,0 +1,1494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rojmel — Cashbook</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Tiro+Devanagari+Marathi:ital@0;1&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --paper:#F6F1E4;
+    --paper-line:#DCD2B4;
+    --ink:#2B2A22;
+    --ink-soft:#6B6552;
+    --green:#1F4D36;
+    --green-deep:#153726;
+    --green-soft:#DCE9DE;
+    --mustard:#C98A1F;
+    --mustard-soft:#F3E1BC;
+    --maroon:#8C3B2E;
+    --maroon-soft:#F1DAD2;
+    --card:#FFFDF7;
+    --shadow: 0 1px 2px rgba(43,42,34,0.06), 0 4px 14px rgba(43,42,34,0.06);
+    --radius: 14px;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    margin:0;
+    background:var(--paper);
+    background-image:
+      linear-gradient(var(--paper-line) 1px, transparent 1px);
+    background-size: 100% 34px;
+    background-attachment:local;
+    color:var(--ink);
+    font-family:'IBM Plex Sans', 'Tiro Devanagari Marathi', sans-serif;
+    -webkit-font-smoothing:antialiased;
+    min-height:100vh;
+  }
+  .devnag{ font-family:'IBM Plex Sans', sans-serif; }
+  .mono{ font-family:'IBM Plex Mono', monospace; font-variant-numeric: tabular-nums; }
+
+  #app{ display:flex; min-height:100vh; }
+
+  /* ---------- Sidebar (desktop) ---------- */
+  .sidebar{
+    display:none;
+    width:230px;
+    flex-shrink:0;
+    background:var(--green-deep);
+    color:#F6F1E4;
+    padding:28px 16px;
+    flex-direction:column;
+    gap:4px;
+  }
+  .sidebar .brand{
+    font-family:'IBM Plex Sans', sans-serif;
+    font-size:26px;
+    font-weight:700;
+    margin:0 8px 28px 8px;
+    letter-spacing:0.5px;
+    display:flex; align-items:center; gap:10px;
+  }
+  .sidebar .brand .mark{
+    width:34px;height:34px;border-radius:8px;background:var(--mustard);
+    color:var(--green-deep); display:flex; align-items:center; justify-content:center;
+    font-weight:700; font-size:18px; font-family:'IBM Plex Sans',sans-serif;
+  }
+  .sidebar button.navitem{
+    all:unset;
+    cursor:pointer;
+    display:flex; align-items:center; gap:12px;
+    padding:11px 12px;
+    border-radius:10px;
+    font-size:15px;
+    color:#E7E2D2;
+    transition:background .15s;
+  }
+  .sidebar button.navitem:hover{ background:rgba(255,255,255,0.06); }
+  .sidebar button.navitem.active{ background:var(--mustard); color:var(--green-deep); font-weight:600; }
+  .sidebar .company-pill{
+    margin:0 8px 22px 8px;
+    padding:10px 12px;
+    background:rgba(255,255,255,0.07);
+    border-radius:10px;
+    font-size:13px;
+    color:#C9C2A9;
+  }
+  .sidebar .company-pill b{ color:#fff; display:block; font-size:14.5px; margin-top:2px; }
+
+  /* ---------- Main ---------- */
+  .main{ flex:1; min-width:0; padding-bottom:92px; }
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:18px 18px 10px 18px;
+  }
+  .topbar .brand-mobile{
+    display:flex; align-items:center; gap:9px;
+    font-family:'IBM Plex Sans', sans-serif;
+    font-size:22px; font-weight:700; color:var(--green-deep);
+  }
+  .topbar .brand-mobile .mark{
+    width:30px;height:30px;border-radius:7px;background:var(--mustard);
+    color:var(--green-deep); display:flex; align-items:center; justify-content:center;
+    font-weight:700; font-size:15px; font-family:'IBM Plex Sans',sans-serif;
+  }
+  .topbar .company-switch{
+    display:flex; align-items:center; gap:6px;
+    background:var(--card); border:1px solid var(--paper-line);
+    padding:7px 12px; border-radius:999px; font-size:13.5px; font-weight:500;
+    cursor:pointer; color:var(--ink);
+  }
+  .topbar .company-switch:hover{ border-color:var(--green); }
+
+  .screen{ padding:6px 18px 18px 18px; max-width:960px; }
+
+  h1.page-title{
+    font-family:'IBM Plex Sans', sans-serif;
+    font-size:22px; margin:6px 0 18px 0; color:var(--green-deep); font-weight:700;
+  }
+
+  /* ---------- Dashboard ---------- */
+  .balance-hero{
+    background:var(--green-deep);
+    color:#F6F1E4;
+    border-radius:18px;
+    padding:26px 22px;
+    position:relative;
+    overflow:hidden;
+    margin-bottom:16px;
+  }
+  .balance-hero::before{
+    content:"";
+    position:absolute; inset:0;
+    background-image: repeating-linear-gradient(0deg, rgba(246,241,228,0.045) 0 1px, transparent 1px 34px);
+    pointer-events:none;
+  }
+  .balance-hero .label{ font-size:13px; color:#B9C9BE; letter-spacing:.3px; }
+  .balance-hero .amount{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:40px; font-weight:600; margin:4px 0 2px 0; letter-spacing:-0.5px;
+  }
+  .balance-hero .amount.neg{ color:#F1B3A2; }
+  .balance-hero .company-name{ font-size:14.5px; color:#D9CFAE; margin-top:8px; font-weight:500; }
+
+  .stat-row{ display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:18px; }
+  .stat-card{
+    background:var(--card); border:1px solid var(--paper-line); border-radius:14px;
+    padding:14px 16px;
+  }
+  .stat-card .lbl{ font-size:12.5px; color:var(--ink-soft); font-weight:500; }
+  .stat-card .val{ font-family:'IBM Plex Mono',monospace; font-size:20px; font-weight:600; margin-top:3px; }
+  .stat-card.in .val{ color:var(--green); }
+  .stat-card.out .val{ color:var(--maroon); }
+
+  .action-row{ display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:22px; }
+  .action-btn{
+    all:unset; cursor:pointer;
+    display:flex; align-items:center; justify-content:center; gap:8px;
+    padding:18px 10px; border-radius:14px; font-size:16px; font-weight:700;
+    box-shadow:var(--shadow);
+  }
+  .action-btn.in{ background:var(--green); color:#fff; }
+  .action-btn.out{ background:var(--maroon); color:#fff; }
+  .action-btn.ghost{
+    background:var(--card); color:var(--ink); border:1px solid var(--paper-line); font-weight:600; font-size:14.5px;
+  }
+  .link-row{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+
+  .recent-title{ font-size:13px; font-weight:600; color:var(--ink-soft); margin:20px 0 8px 2px; text-transform:uppercase; letter-spacing:.4px; }
+
+  /* ---------- Ledger / list rows ---------- */
+  .row-card{
+    background:var(--card); border:1px solid var(--paper-line); border-radius:12px;
+    padding:12px 14px; display:flex; align-items:center; justify-content:space-between;
+    margin-bottom:8px; cursor:pointer;
+  }
+  .row-card:hover{ border-color:var(--green); }
+  .row-left{ display:flex; flex-direction:column; gap:2px; }
+  .row-left .party{ font-weight:600; font-size:14.5px; }
+  .row-left .sub{ font-size:12px; color:var(--ink-soft); }
+  .row-right{ text-align:right; }
+  .row-right .amt{ font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:15px; }
+  .row-right .amt.in{ color:var(--green); }
+  .row-right .amt.out{ color:var(--maroon); }
+  .row-right .bal{ font-size:11px; color:var(--ink-soft); margin-top:1px; font-family:'IBM Plex Mono',monospace;}
+
+  .tag{ font-size:10.5px; font-weight:700; padding:2px 7px; border-radius:5px; letter-spacing:.3px; }
+  .tag.in{ background:var(--green-soft); color:var(--green-deep); }
+  .tag.out{ background:var(--maroon-soft); color:var(--maroon); }
+
+  /* ---------- Search / filter bar ---------- */
+  .toolbar{ display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap; }
+  .search-input{
+    flex:1; min-width:140px;
+    padding:10px 14px; border-radius:10px; border:1px solid var(--paper-line);
+    background:var(--card); font-size:14px; color:var(--ink); font-family:inherit;
+  }
+  .search-input:focus{ outline:2px solid var(--green); outline-offset:1px; }
+  .filter-chip{
+    all:unset; cursor:pointer;
+    padding:9px 13px; border-radius:10px; border:1px solid var(--paper-line);
+    background:var(--card); font-size:13px; font-weight:500; color:var(--ink-soft);
+    white-space:nowrap;
+  }
+  .filter-chip.active{ background:var(--green); border-color:var(--green); color:#fff; }
+
+  /* ---------- Forms ---------- */
+  .form-card{
+    background:var(--card); border:1px solid var(--paper-line); border-radius:16px;
+    padding:20px; max-width:480px;
+  }
+  .field{ margin-bottom:16px; }
+  .field label{ display:block; font-size:13px; font-weight:600; color:var(--ink-soft); margin-bottom:6px; }
+  .field input, .field textarea, .field select{
+    width:100%; padding:12px 13px; border-radius:10px; border:1.5px solid var(--paper-line);
+    font-size:15.5px; font-family:inherit; background:#FFFEFB; color:var(--ink);
+  }
+  .field input:focus, .field textarea:focus, .field select:focus{
+    outline:none; border-color:var(--green);
+  }
+  .amount-field{ position:relative; }
+  .amount-field input{ padding-left:32px; font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:18px; }
+  .amount-field .rs{ position:absolute; left:13px; top:50%; transform:translateY(-50%); font-weight:600; color:var(--ink-soft); }
+  .party-suggest{
+    border:1px solid var(--paper-line); border-radius:10px; margin-top:4px; background:#fff;
+    max-height:160px; overflow-y:auto; box-shadow:var(--shadow);
+  }
+  .party-suggest div{ padding:9px 13px; font-size:14px; cursor:pointer; }
+  .party-suggest div:hover, .party-suggest div.highlighted{ background:var(--paper); }
+
+  .btn-primary{
+    all:unset; cursor:pointer; display:block; text-align:center;
+    padding:14px; border-radius:11px; font-weight:700; font-size:15.5px; color:#fff;
+    width:100%;
+  }
+  .btn-primary.green{ background:var(--green); }
+  .btn-primary.maroon{ background:var(--maroon); }
+  .btn-secondary{
+    all:unset; cursor:pointer; display:block; text-align:center;
+    padding:13px; border-radius:11px; font-weight:600; font-size:14.5px; color:var(--ink-soft);
+    width:100%; border:1px solid var(--paper-line); margin-top:10px; background:var(--card);
+  }
+  .form-row-btn{ display:flex; gap:10px; margin-top:6px; }
+  .icon-btn{
+    all:unset; cursor:pointer; padding:9px 12px; border-radius:9px; border:1px solid var(--paper-line);
+    background:var(--card); font-size:13px; color:var(--maroon); font-weight:600;
+  }
+
+  /* ---------- Ledger detail ---------- */
+  .ledger-summary{ display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-bottom:16px; }
+
+  /* ---------- Calendar ---------- */
+  .cal-header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+  .cal-header .cal-month-label{ font-weight:700; font-size:16px; color:var(--green-deep); }
+  .cal-header button{ all:unset; cursor:pointer; padding:6px 12px; border-radius:8px; background:var(--card); border:1px solid var(--paper-line); font-size:14px; }
+  .cal-grid{ display:grid; grid-template-columns:repeat(7,1fr); gap:5px; }
+  .cal-dow{ text-align:center; font-size:11px; font-weight:700; color:var(--ink-soft); padding-bottom:4px; }
+  .cal-cell{
+    background:var(--card); border:1px solid var(--paper-line); border-radius:9px;
+    min-height:56px; padding:5px 4px; cursor:pointer; display:flex; flex-direction:column; gap:2px;
+  }
+  .cal-cell:hover{ border-color:var(--green); }
+  .cal-cell.empty{ background:transparent; border:none; cursor:default; }
+  .cal-cell.today{ border-color:var(--mustard); border-width:2px; }
+  .cal-cell.selected{ background:var(--green-deep); border-color:var(--green-deep); }
+  .cal-cell.selected .cal-daynum, .cal-cell.selected .cal-net{ color:#F6F1E4 !important; }
+  .cal-daynum{ font-size:12px; font-weight:600; color:var(--ink); }
+  .cal-net{ font-family:'IBM Plex Mono',monospace; font-size:10.5px; font-weight:600; line-height:1.2; }
+  .cal-net.in{ color:var(--green); }
+  .cal-net.out{ color:var(--maroon); }
+  .cal-day-panel{ margin-top:20px; }
+  .cal-day-panel h2{ font-size:16px; margin:0 0 12px 0; color:var(--green-deep); }
+
+  /* ---------- Login ---------- */
+  .login-wrap{
+    min-height:100vh; display:flex; align-items:center; justify-content:center;
+    background:var(--paper);
+    background-image: linear-gradient(var(--paper-line) 1px, transparent 1px);
+    background-size: 100% 34px;
+    padding:20px;
+  }
+  .login-card{
+    background:var(--card); border:1px solid var(--paper-line); border-radius:16px;
+    padding:32px 28px; width:100%; max-width:360px; box-shadow:0 4px 24px rgba(0,0,0,.08);
+  }
+  .login-card .mark{
+    width:44px; height:44px; border-radius:12px; background:var(--green-deep); color:#F6F1E4;
+    display:flex; align-items:center; justify-content:center; font-weight:700; font-size:18px; margin-bottom:14px;
+  }
+  .login-card h1{ font-size:20px; margin:0 0 6px 0; color:var(--green-deep); }
+  .login-card .sub{ font-size:13px; color:var(--ink-soft); margin-bottom:20px; }
+  .login-error{ color:var(--maroon); font-size:13px; margin-bottom:12px; font-weight:600; }
+
+  /* ---------- Users / History ---------- */
+  .user-row{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    background:var(--card); border:1px solid var(--paper-line); border-radius:10px;
+    padding:12px 14px; margin-bottom:8px;
+  }
+  .user-row .u-name{ font-weight:700; font-size:14px; }
+  .user-row .u-role{ font-size:11px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.03em; }
+  .user-row .u-actions{ display:flex; gap:8px; }
+  .user-row .u-actions button{ all:unset; cursor:pointer; font-size:13px; padding:5px 10px; border-radius:7px; background:var(--paper); }
+  .log-row{
+    padding:10px 0; border-bottom:1px solid var(--paper-line); font-size:13px;
+  }
+  .log-row .log-meta{ color:var(--ink-soft); font-size:11.5px; margin-top:2px; }
+
+
+  .ledger-summary .cell{ background:var(--card); border:1px solid var(--paper-line); border-radius:12px; padding:12px 14px; }
+  .ledger-summary .cell .k{ font-size:11.5px; color:var(--ink-soft); font-weight:600; }
+  .ledger-summary .cell .v{ font-family:'IBM Plex Mono',monospace; font-size:17px; font-weight:600; margin-top:2px; }
+
+  table.ledger-table{ width:100%; border-collapse:collapse; background:var(--card); border-radius:12px; overflow:hidden; border:1px solid var(--paper-line); }
+  table.ledger-table th{ text-align:left; font-size:11.5px; text-transform:uppercase; letter-spacing:.3px; color:var(--ink-soft); padding:10px 12px; border-bottom:1.5px solid var(--paper-line); background:var(--paper); }
+  table.ledger-table td{ padding:10px 12px; font-size:13.5px; border-bottom:1px solid var(--paper-line); }
+  table.ledger-table tr:last-child td{ border-bottom:none; }
+  table.ledger-table td.num{ font-family:'IBM Plex Mono',monospace; text-align:right; }
+  table.ledger-table td.in{ color:var(--green); font-weight:600; }
+  table.ledger-table td.out{ color:var(--maroon); font-weight:600; }
+  .row-actions{ display:flex; gap:6px; }
+  .row-actions button{ all:unset; cursor:pointer; font-size:11.5px; color:var(--ink-soft); padding:3px 6px; border-radius:5px; }
+  .row-actions button:hover{ background:var(--paper); }
+
+  .empty-state{ text-align:center; padding:50px 20px; color:var(--ink-soft); }
+  .empty-state .big{ font-size:38px; margin-bottom:10px; }
+  .empty-state .msg{ font-size:14.5px; }
+
+  /* ---------- Bottom nav (mobile) ---------- */
+  .bottom-nav{
+    position:fixed; bottom:0; left:0; right:0;
+    background:var(--card);
+    border-top:1px solid var(--paper-line);
+    display:flex; justify-content:space-around; align-items:center;
+    padding:8px 6px 10px 6px;
+    z-index:40;
+  }
+  .bottom-nav button{
+    all:unset; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:3px;
+    font-size:10.5px; color:var(--ink-soft); font-weight:600; padding:4px 10px;
+  }
+  .bottom-nav button .ic{ font-size:19px; }
+  .bottom-nav button.active{ color:var(--green); }
+  .fab{
+    position:fixed; bottom:76px; left:50%; transform:translateX(-50%);
+    width:58px; height:58px; border-radius:50%;
+    background:var(--mustard); color:var(--green-deep);
+    display:flex; align-items:center; justify-content:center;
+    font-size:28px; font-weight:700; box-shadow:0 6px 16px rgba(201,138,31,0.5);
+    border:none; cursor:pointer; z-index:41;
+  }
+
+  /* ---------- Modal / sheet ---------- */
+  .overlay{
+    position:fixed; inset:0; background:rgba(21,20,15,0.45); z-index:60;
+    display:flex; align-items:flex-end; justify-content:center;
+  }
+  .overlay.center{ align-items:center; }
+  .sheet{
+    background:var(--paper); width:100%; max-width:460px; border-radius:20px 20px 0 0;
+    padding:22px 20px 28px 20px; max-height:88vh; overflow-y:auto;
+  }
+  .overlay.center .sheet{ border-radius:18px; }
+  .sheet-handle{ width:38px; height:4px; background:var(--paper-line); border-radius:3px; margin:0 auto 16px auto; }
+  .sheet h2{ font-family:'IBM Plex Sans',sans-serif; font-size:19px; margin:0 0 16px 0; color:var(--green-deep); }
+  .entry-choice{ display:flex; gap:12px; }
+  .entry-choice button{ all:unset; flex:1; cursor:pointer; text-align:center; padding:22px 10px; border-radius:14px; font-weight:700; font-size:15px; }
+  .entry-choice .in{ background:var(--green-soft); color:var(--green-deep); }
+  .entry-choice .out{ background:var(--maroon-soft); color:var(--maroon); }
+
+  .company-list-item{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:13px 14px; border-radius:12px; background:var(--card); border:1px solid var(--paper-line);
+    margin-bottom:8px; cursor:pointer;
+  }
+  .company-list-item.selected{ border-color:var(--green); background:var(--green-soft); }
+  .company-list-item .name{ font-weight:600; font-size:15px; }
+  .company-list-item .bal{ font-family:'IBM Plex Mono',monospace; font-size:12.5px; color:var(--ink-soft); }
+  .close-x{ all:unset; cursor:pointer; float:right; font-size:20px; color:var(--ink-soft); padding:2px 6px; }
+
+  @media (min-width: 860px){
+    .sidebar{ display:flex; }
+    .topbar .brand-mobile{ display:none; }
+    .bottom-nav, .fab{ display:none; }
+    .main{ padding-bottom:20px; }
+    .screen{ padding:24px 34px; max-width:900px; }
+    .stat-row{ grid-template-columns:repeat(3,1fr); }
+    .action-row{ max-width:420px; }
+  }
+  ::selection{ background:var(--mustard-soft); }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------------- storage (Supabase) ----------------
+  const SUPABASE_URL = "https://shuqxrixznpcjjfofjxk.supabase.co";
+  const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNodXF4cml4em5wY2pqZm9manhrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc4OTY3ODEsImV4cCI6MjEwMzQ3Mjc4MX0.6MjRUIaLXl8h_j7ELQQfxOQKjhV4XcwsHXmeb7VTiAM";
+  const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const ROW_ID = "main";
+
+  let data = { companies: [], transactions: [], activeCompanyId: null, partyPhones: {}, users: [], activityLog: [] };
+  let loaded = false;
+
+  function phoneKey(companyId, party){ return companyId+"::"+party; }
+  function getPartyPhone(companyId, party){ return (data.partyPhones||{})[phoneKey(companyId,party)] || ""; }
+  function setPartyPhone(companyId, party, phone){
+    if(!data.partyPhones) data.partyPhones = {};
+    const k = phoneKey(companyId,party);
+    if(phone) data.partyPhones[k] = phone;
+    else delete data.partyPhones[k];
+  }
+
+  function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
+
+  function logActivity(action){
+    if(!data.activityLog) data.activityLog = [];
+    data.activityLog.unshift({
+      id: uid(),
+      ts: Date.now(),
+      user: currentUser ? currentUser.username : "system",
+      action
+    });
+    if(data.activityLog.length > 500) data.activityLog.length = 500;
+  }
+
+  async function loadData(){
+    try{
+      const { data: row, error } = await sb.from("rojmel_data").select("data").eq("id", ROW_ID).maybeSingle();
+      if(error) throw error;
+      if(row && row.data){
+        data = Object.assign({companies:[],transactions:[],activeCompanyId:null,partyPhones:{},users:[],activityLog:[]}, row.data);
+        if(!data.partyPhones) data.partyPhones = {};
+        if(!data.users) data.users = [];
+        if(!data.activityLog) data.activityLog = [];
+      }
+    }catch(e){ console.error("load failed", e); /* no data yet */ }
+    if(data.companies.length === 0){
+      const id = uid();
+      data.companies.push({id, name:"New Vyankatesh Agro", openingBalance:0});
+      data.activeCompanyId = id;
+    }
+    if(!data.activeCompanyId) data.activeCompanyId = data.companies[0].id;
+    if(data.users.length === 0){
+      data.users.push({id: uid(), username:"admin", password:"123", role:"admin"});
+    }
+    loaded = true;
+  }
+
+  let saveTimer = null;
+  function save(){
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(async ()=>{
+      try{
+        const { error } = await sb.from("rojmel_data").upsert({ id: ROW_ID, data: data, updated_at: new Date().toISOString() });
+        if(error) throw error;
+      }
+      catch(e){ console.error("save failed", e); }
+    }, 120);
+  }
+
+  // ---------------- state ----------------
+  let view = "dashboard"; // dashboard | cashflow | ledgerList | ledgerDetail | company | addCompany | renameCompany | entryForm | editEntry | calendar
+  let ledgerParty = null;
+  let entryType = "in"; // in | out
+  let editingTxId = null;
+  let overlay = null; // "entryChoice" | "companySwitch" | null
+  let searchQuery = "";
+  let dateFilter = "all"; // all | today | month | custom
+  let customDate = "";
+  let partySearchTerm = "";
+  let showPartySuggest = false;
+  let calMonth = new Date().getMonth();
+  let calYear = new Date().getFullYear();
+  let selectedCalDate = null;
+  let currentUser = null;
+  let loginError = "";
+  let editingUserId = null;
+
+  function activeCompany(){ return data.companies.find(c=>c.id===data.activeCompanyId); }
+  function companyTx(companyId){ return data.transactions.filter(t=>t.companyId===companyId); }
+
+  function fmt(n){
+    n = Number(n)||0;
+    const neg = n<0; n = Math.abs(n);
+    let s = n.toFixed(2);
+    let [ip,dp] = s.split(".");
+    let lastThree = ip.slice(-3);
+    let other = ip.slice(0,-3);
+    if(other) lastThree = ","+lastThree;
+    let formatted = other.replace(/\B(?=(\d{2})+(?!\d))/g, ",") + lastThree;
+    if(dp==="00") return (neg?"-":"")+"₹"+formatted;
+    return (neg?"-":"")+"₹"+formatted+"."+dp;
+  }
+
+  function computeBalance(companyId){
+    const c = data.companies.find(x=>x.id===companyId);
+    const tx = companyTx(companyId);
+    let inTotal=0, outTotal=0;
+    tx.forEach(t=>{ if(t.type==="in") inTotal+=t.amount; else outTotal+=t.amount; });
+    return { opening:c.openingBalance, inTotal, outTotal, balance: c.openingBalance+inTotal-outTotal };
+  }
+
+  function partiesOf(companyId){
+    const set = new Map();
+    companyTx(companyId).forEach(t=>{
+      if(!set.has(t.party)) set.set(t.party, true);
+    });
+    return Array.from(set.keys()).sort((a,b)=>a.localeCompare(b));
+  }
+
+  function partyLedger(companyId, party){
+    const tx = companyTx(companyId).filter(t=>t.party===party).sort((a,b)=> a.date===b.date ? (a.createdAt-b.createdAt) : a.date.localeCompare(b.date));
+    let running = 0;
+    let inTotal=0,outTotal=0;
+    const rows = tx.map(t=>{
+      if(t.type==="in"){ running+=t.amount; inTotal+=t.amount; } else { running-=t.amount; outTotal+=t.amount; }
+      return Object.assign({}, t, {running});
+    });
+    return { rows, inTotal, outTotal, closing: running };
+  }
+
+  function el(tag, attrs, children){
+    const e = document.createElement(tag);
+    if(attrs) for(const k in attrs){
+      if(k==="class") e.className = attrs[k];
+      else if(k==="html") e.innerHTML = attrs[k];
+      else if(k.startsWith("on")) e.addEventListener(k.slice(2).toLowerCase(), attrs[k]);
+      else e.setAttribute(k, attrs[k]);
+    }
+    if(children) (Array.isArray(children)?children:[children]).forEach(c=>{
+      if(c==null) return;
+      if(typeof c === "string") e.appendChild(document.createTextNode(c));
+      else e.appendChild(c);
+    });
+    return e;
+  }
+
+  let lastUsedDate = null;
+  function todayStr(){ const d=new Date(); return d.toISOString().slice(0,10); }
+
+  // ---------------- PDF export (via browser print, for correct Devanagari rendering) ----------------
+  function escapeHtml(s){
+    return String(s==null?"":s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  }
+
+  function openPrintReport({title, companyName, summaryLines, head, rows}){
+    const win = window.open("", "_blank");
+    if(!win){ alert("Pop-up blocked. Please allow pop-ups and try again."); return; }
+    const rowsHtml = rows.map(r=>
+      "<tr>"+r.map((cell,i)=>{
+        const isNum = i>=r.length-3;
+        return "<td"+(isNum?' class="num"':'')+">"+escapeHtml(cell)+"</td>";
+      }).join("")+"</tr>"
+    ).join("");
+    const headHtml = head.map(h=>"<th>"+escapeHtml(h)+"</th>").join("");
+    const summaryHtml = (summaryLines||[]).map(l=>"<div>"+escapeHtml(l)+"</div>").join("");
+    win.document.write(`<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8">
+<title>${escapeHtml(title)}</title>
+<style>
+  *{box-sizing:border-box;}
+  body{ font-family:Arial, Helvetica, sans-serif; margin:28px; color:#2B2A22; }
+  h1{ font-size:20px; margin:0 0 4px 0; color:#153726; }
+  .sub{ font-size:13px; color:#6B6552; margin-bottom:2px; }
+  .summary{ margin:14px 0 18px 0; font-size:13px; font-weight:600; color:#1F4D36; display:flex; flex-direction:column; gap:2px; }
+  table{ width:100%; border-collapse:collapse; font-size:12.5px; }
+  th,td{ border:1px solid #DCD2B4; padding:6px 8px; text-align:left; }
+  th{ background:#153726; color:#F6F1E4; }
+  td.num{ text-align:right; font-family:'Courier New', monospace; }
+  @media print{ body{ margin:10mm; } }
+</style>
+</head><body>
+<h1>${escapeHtml(title)}</h1>
+<div class="sub">${escapeHtml(companyName)}</div>
+<div class="sub">Date: ${escapeHtml(new Date().toLocaleDateString("en-IN"))}</div>
+<div class="summary">${summaryHtml}</div>
+<table><thead><tr>${headHtml}</tr></thead><tbody>${rowsHtml}</tbody></table>
+</body></html>`);
+    win.document.close();
+    win.onload = ()=>{ setTimeout(()=>{ win.focus(); win.print(); }, 300); };
+  }
+
+  function exportCashflowPDF(comp, tx, balMap){
+    const rows = tx.slice().reverse().map(t=>[
+      t.date, t.party, t.remark||"-",
+      t.type==="in"?fmt(t.amount):"", t.type==="out"?fmt(t.amount):"", fmt(balMap[t.id])
+    ]);
+    let inT=0,outT=0; tx.forEach(t=>{ if(t.type==="in") inT+=t.amount; else outT+=t.amount; });
+    openPrintReport({
+      title: "Cash Flow Report",
+      companyName: comp.name,
+      summaryLines: ["Total In: "+fmt(inT)+"   Total Out: "+fmt(outT)+"   Net: "+fmt(inT-outT)],
+      head: ["Date","Party","Remark","In","Out","Balance"],
+      rows
+    });
+  }
+
+  function exportLedgerPDF(comp, party, l){
+    const rows = l.rows.slice().reverse().map(t=>[
+      t.date, t.remark||"-",
+      t.type==="in"?fmt(t.amount):"", t.type==="out"?fmt(t.amount):"", fmt(t.running)
+    ]);
+    openPrintReport({
+      title: "Party Ledger - "+party,
+      companyName: comp.name,
+      summaryLines: ["Total In: "+fmt(l.inTotal)+"   Total Out: "+fmt(l.outTotal)+"   Closing Balance: "+fmt(l.closing)],
+      head: ["Date","Remark","In","Out","Balance"],
+      rows
+    });
+  }
+
+  function exportDashboardPDF(comp, bal){
+    const tx = companyTx(comp.id).slice().sort((a,b)=> a.date===b.date ? (a.createdAt-b.createdAt) : a.date.localeCompare(b.date));
+    let running = bal.opening;
+    const rows = tx.map(t=>{
+      running += t.type==="in" ? t.amount : -t.amount;
+      return [t.date, t.party, t.remark||"-", t.type==="in"?fmt(t.amount):"", t.type==="out"?fmt(t.amount):"", fmt(running)];
+    }).reverse();
+    openPrintReport({
+      title: "Account Summary Report",
+      companyName: comp.name,
+      summaryLines: [
+        "Opening Balance: "+fmt(bal.opening),
+        "Total Cash In: "+fmt(bal.inTotal)+"   Total Cash Out: "+fmt(bal.outTotal),
+        "Current Balance: "+fmt(bal.balance)
+      ],
+      head: ["Date","Party","Remark","In","Out","Balance"],
+      rows
+    });
+  }
+
+  function filteredCompanyTx(companyId){
+    let tx = companyTx(companyId).slice().sort((a,b)=> b.date===a.date ? (b.createdAt-a.createdAt) : b.date.localeCompare(a.date));
+    if(dateFilter==="today"){
+      const t = todayStr();
+      tx = tx.filter(x=>x.date===t);
+    } else if(dateFilter==="month"){
+      const m = todayStr().slice(0,7);
+      tx = tx.filter(x=>x.date.slice(0,7)===m);
+    } else if(dateFilter==="custom" && customDate){
+      tx = tx.filter(x=>x.date===customDate);
+    }
+    if(searchQuery.trim()){
+      const q = searchQuery.trim().toLowerCase();
+      tx = tx.filter(x=> x.party.toLowerCase().includes(q) || (x.remark||"").toLowerCase().includes(q));
+    }
+    return tx;
+  }
+
+  // running balance per company for cashflow display (chronological)
+  function runningBalancesMap(companyId){
+    const c = data.companies.find(x=>x.id===companyId);
+    const chron = companyTx(companyId).slice().sort((a,b)=> a.date===b.date ? (a.createdAt-b.createdAt) : a.date.localeCompare(b.date));
+    let bal = c.openingBalance;
+    const map = {};
+    chron.forEach(t=>{
+      bal += t.type==="in" ? t.amount : -t.amount;
+      map[t.id] = bal;
+    });
+    return map;
+  }
+
+  // ---------------- render ----------------
+  function render(){
+    const app = document.getElementById("app");
+    app.innerHTML = "";
+    if(!loaded){ app.appendChild(el("div",{class:"screen"},"...")); return; }
+
+    if(!currentUser){ renderLogin(app); return; }
+
+    const comp = activeCompany();
+    const bal = computeBalance(comp.id);
+
+    // Sidebar
+    const sidebar = el("div",{class:"sidebar"});
+    sidebar.appendChild(el("div",{class:"brand"},[el("div",{class:"mark"},"R"), "Rojmel"]));
+    const pill = el("div",{class:"company-pill"},["Current Company", el("b",{},comp.name)]);
+    pill.style.cursor="pointer";
+    pill.onclick = ()=>{ view="company"; render(); };
+    sidebar.appendChild(pill);
+    const navDefs = [
+      ["dashboard","🏠","Home / Dashboard"],
+      ["entryIn","➕","Cash In"],
+      ["entryOut","➖","Cash Out"],
+      ["cashflow","📄","Cash Flow"],
+      ["calendar","📅","Calendar"],
+      ["ledgerList","📒","Ledger"],
+      ["company","🏢","Company"],
+    ];
+    if(currentUser.role==="admin"){
+      navDefs.push(["users","👥","Users"]);
+      navDefs.push(["history","🕘","History"]);
+    }
+    navDefs.forEach(([id,ic,label])=>{
+      const active = (view===id) || (id==="dashboard" && view==="dashboard");
+      const btn = el("button",{class:"navitem"+(view===id?" active":"")}, [ic+"  "+label]);
+      btn.onclick = ()=>{
+        if(id==="entryIn"){ entryType="in"; editingTxId=null; view="entryForm"; }
+        else if(id==="entryOut"){ entryType="out"; editingTxId=null; view="entryForm"; }
+        else view = id;
+        render();
+      };
+      sidebar.appendChild(btn);
+    });
+    const logoutBtn = el("button",{class:"navitem", style:"margin-top:8px;color:var(--maroon);"},"🚪  Logout ("+currentUser.username+")");
+    logoutBtn.onclick = ()=>{
+      logActivity("Logged out");
+      save();
+      currentUser = null;
+      try{ sessionStorage.removeItem("rojmel_session"); }catch(e){}
+      loginError = "";
+      render();
+    };
+    sidebar.appendChild(logoutBtn);
+    app.appendChild(sidebar);
+
+    // Main
+    const main = el("div",{class:"main"});
+    const topbar = el("div",{class:"topbar"});
+    topbar.appendChild(el("div",{class:"brand-mobile"},[el("div",{class:"mark"},"R"),"Rojmel"]));
+    const switcher = el("div",{class:"company-switch"},[comp.name+" ▾"]);
+    switcher.onclick = ()=>{ overlay="companySwitch"; render(); };
+    topbar.appendChild(switcher);
+    const mobileLogout = el("button",{class:"filter-chip", style:"margin-left:auto;"},"🚪");
+    mobileLogout.onclick = ()=>{
+      logActivity("Logged out");
+      save();
+      currentUser = null;
+      try{ sessionStorage.removeItem("rojmel_session"); }catch(e){}
+      loginError = "";
+      render();
+    };
+    topbar.appendChild(mobileLogout);
+    main.appendChild(topbar);
+
+    const screen = el("div",{class:"screen"});
+    if(view==="dashboard") renderDashboard(screen, comp, bal);
+    else if(view==="cashflow") renderCashflow(screen, comp);
+    else if(view==="calendar") renderCalendar(screen, comp);
+    else if(view==="ledgerList") renderLedgerList(screen, comp);
+    else if(view==="ledgerDetail") renderLedgerDetail(screen, comp);
+    else if(view==="company") renderCompanyScreen(screen, comp);
+    else if(view==="addCompany") renderAddCompany(screen);
+    else if(view==="renameCompany") renderRenameCompany(screen, comp);
+    else if(view==="entryForm") renderEntryForm(screen, comp);
+    else if(view==="users") renderUsers(screen);
+    else if(view==="editUser") renderEditUser(screen);
+    else if(view==="history") renderHistory(screen);
+    main.appendChild(screen);
+    app.appendChild(main);
+
+    // bottom nav
+    const bnav = el("div",{class:"bottom-nav"});
+    const bnavDefs = [
+      ["dashboard","🏠","Home"],
+      ["cashflow","📄","Cash Flow"],
+      ["calendar","📅","Calendar"],
+      ["__fab__","",""],
+      ["ledgerList","📒","Ledger"],
+      ["company","🏢","Company"],
+    ];
+    if(currentUser.role==="admin"){
+      bnavDefs.push(["users","👥","Users"]);
+      bnavDefs.push(["history","🕘","History"]);
+    }
+    bnavDefs.forEach(([id,ic,label])=>{
+      if(id==="__fab__"){ bnav.appendChild(el("div",{style:"width:52px"})); return; }
+      const btn = el("button",{class:view===id?"active":""},[el("div",{class:"ic"},ic), el("div",{},label)]);
+      btn.onclick = ()=>{ view=id; render(); };
+      bnav.appendChild(btn);
+    });
+    app.appendChild(bnav);
+
+    const fab = el("button",{class:"fab"},"+");
+    fab.onclick = ()=>{ overlay="entryChoice"; render(); };
+    app.appendChild(fab);
+
+    // overlays
+    if(overlay==="entryChoice") renderEntryChoiceOverlay(app);
+    if(overlay==="companySwitch") renderCompanySwitchOverlay(app);
+  }
+
+  function renderDashboard(screen, comp, bal){
+    const hero = el("div",{class:"balance-hero"});
+    hero.appendChild(el("div",{class:"label"},"Current Balance"));
+    hero.appendChild(el("div",{class:"amount"+(bal.balance<0?" neg":"")}, fmt(bal.balance)));
+    hero.appendChild(el("div",{class:"company-name"}, comp.name));
+    screen.appendChild(hero);
+
+    const stats = el("div",{class:"stat-row"});
+    stats.appendChild(el("div",{class:"stat-card"},[el("div",{class:"lbl"},"Opening Balance"), el("div",{class:"val"}, fmt(bal.opening))]));
+    stats.appendChild(el("div",{class:"stat-card in"},[el("div",{class:"lbl"},"Total Cash In"), el("div",{class:"val"}, fmt(bal.inTotal))]));
+    stats.appendChild(el("div",{class:"stat-card out"},[el("div",{class:"lbl"},"Total Cash Out"), el("div",{class:"val"}, fmt(bal.outTotal))]));
+    screen.appendChild(stats);
+
+    const actions = el("div",{class:"action-row"});
+    const btnIn = el("button",{class:"action-btn in"},"+ Cash In");
+    btnIn.onclick = ()=>{ entryType="in"; editingTxId=null; view="entryForm"; render(); };
+    const btnOut = el("button",{class:"action-btn out"},"− Cash Out");
+    btnOut.onclick = ()=>{ entryType="out"; editingTxId=null; view="entryForm"; render(); };
+    actions.appendChild(btnIn); actions.appendChild(btnOut);
+    screen.appendChild(actions);
+
+    const links = el("div",{class:"link-row"});
+    const l1 = el("button",{class:"action-btn ghost"},"📄  Cash Flow");
+    l1.onclick = ()=>{ view="cashflow"; render(); };
+    const l2 = el("button",{class:"action-btn ghost"},"📒  Ledger");
+    l2.onclick = ()=>{ view="ledgerList"; render(); };
+    links.appendChild(l1); links.appendChild(l2);
+    screen.appendChild(links);
+
+    const pdfBtn = el("button",{class:"action-btn ghost", style:"width:100%;margin-bottom:16px;"},"🖨  PDF Report (Print)");
+    pdfBtn.onclick = ()=> exportDashboardPDF(comp, bal);
+    screen.appendChild(pdfBtn);
+
+    screen.appendChild(el("div",{class:"recent-title"},"Recent Transactions"));
+    const recent = companyTx(comp.id).slice().sort((a,b)=> b.date===a.date ? (b.createdAt-a.createdAt): b.date.localeCompare(a.date)).slice(0,6);
+    if(recent.length===0){
+      screen.appendChild(el("div",{class:"empty-state"},[el("div",{class:"big"},"📗"), el("div",{class:"msg"},"No transactions yet. Tap + to get started.")]));
+    } else {
+      recent.forEach(t=> screen.appendChild(txRow(t)));
+    }
+  }
+
+  function txRow(t, showBalance, balMap){
+    const row = el("div",{class:"row-card"});
+    row.onclick = ()=>{ editingTxId=t.id; entryType=t.type; view="entryForm"; render(); };
+    const left = el("div",{class:"row-left"},[
+      el("div",{class:"party"}, t.party),
+      el("div",{class:"sub"}, t.date + (t.remark? " · "+t.remark : ""))
+    ]);
+    const right = el("div",{class:"row-right"});
+    right.appendChild(el("div",{},[
+      el("span",{class:"tag "+t.type}, t.type==="in"?"IN":"OUT"),
+      " ",
+      el("span",{class:"amt "+t.type}, (t.type==="in"?"+":"-")+fmt(t.amount))
+    ]));
+    if(showBalance && balMap) right.appendChild(el("div",{class:"bal"}, "Balance "+fmt(balMap[t.id])));
+    row.appendChild(left); row.appendChild(right);
+    return row;
+  }
+
+  function renderCashflow(screen, comp){
+    screen.appendChild(el("h1",{class:"page-title"},"Cash Flow"));
+    const toolbar = el("div",{class:"toolbar"});
+    const search = el("input",{class:"search-input", placeholder:"Search party or remark...", value:searchQuery});
+    search.oninput = (e)=>{ searchQuery = e.target.value; renderInPlaceCashflow(); };
+    toolbar.appendChild(search);
+    screen.appendChild(toolbar);
+
+    const chips = el("div",{class:"toolbar"});
+    [["all","All"],["today","Today"],["month","This Month"],["custom","Custom Date"]].forEach(([id,label])=>{
+      const chip = el("button",{class:"filter-chip"+(dateFilter===id?" active":"")}, label);
+      chip.onclick = ()=>{ dateFilter=id; render(); };
+      chips.appendChild(chip);
+    });
+    screen.appendChild(chips);
+
+    if(dateFilter==="custom"){
+      const dateWrap = el("div",{class:"toolbar"});
+      const dateInput = el("input",{class:"search-input", type:"date", value:customDate});
+      dateInput.onchange = (e)=>{ customDate = e.target.value; render(); };
+      dateWrap.appendChild(dateInput);
+      screen.appendChild(dateWrap);
+    }
+
+    const pdfBtn = el("button",{class:"action-btn ghost", style:"width:100%;margin-bottom:12px;"},"🖨  PDF Report (Print)");
+    pdfBtn.onclick = ()=>{
+      const tx = filteredCompanyTx(comp.id);
+      const balMap = runningBalancesMap(comp.id);
+      if(tx.length===0){ alert("No transactions to export"); return; }
+      exportCashflowPDF(comp, tx, balMap);
+    };
+    screen.appendChild(pdfBtn);
+
+    const listWrap = el("div",{id:"cf-list"});
+    screen.appendChild(listWrap);
+    fillCashflowList(listWrap, comp);
+
+    function renderInPlaceCashflow(){
+      const w = document.getElementById("cf-list");
+      if(w) fillCashflowList(w, comp);
+    }
+  }
+
+  function fillCashflowList(container, comp){
+    container.innerHTML = "";
+    const tx = filteredCompanyTx(comp.id);
+    const balMap = runningBalancesMap(comp.id);
+    if(tx.length===0){
+      container.appendChild(el("div",{class:"empty-state"},[el("div",{class:"big"},"🔍"), el("div",{class:"msg"},"No transactions found.")]));
+      return;
+    }
+    tx.forEach(t=> container.appendChild(txRow(t, true, balMap)));
+  }
+
+  function dayTotalsMap(companyId, year, month){
+    // month is 0-indexed
+    const prefix = year+"-"+String(month+1).padStart(2,"0");
+    const map = {};
+    companyTx(companyId).forEach(t=>{
+      if(!t.date.startsWith(prefix)) return;
+      if(!map[t.date]) map[t.date] = {in:0, out:0};
+      if(t.type==="in") map[t.date].in += t.amount; else map[t.date].out += t.amount;
+    });
+    return map;
+  }
+
+  function exportDayPDF(comp, dateStr, tx){
+    const rows = tx.slice().map(t=>[t.party, t.remark||"-", t.type==="in"?fmt(t.amount):"", t.type==="out"?fmt(t.amount):""]);
+    let inT=0,outT=0; tx.forEach(t=>{ if(t.type==="in") inT+=t.amount; else outT+=t.amount; });
+    openPrintReport({
+      title: "Day Report - "+dateStr,
+      companyName: comp.name,
+      summaryLines: ["Total In: "+fmt(inT)+"   Total Out: "+fmt(outT)+"   Net: "+fmt(inT-outT)],
+      head: ["Party","Remark","In","Out"],
+      rows
+    });
+  }
+
+  function renderCalendar(screen, comp){
+    screen.appendChild(el("h1",{class:"page-title"},"Calendar"));
+
+    const header = el("div",{class:"cal-header"});
+    const prevBtn = el("button",{},"←");
+    prevBtn.onclick = ()=>{ calMonth--; if(calMonth<0){ calMonth=11; calYear--; } selectedCalDate=null; render(); };
+    const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+    const label = el("div",{class:"cal-month-label"}, monthNames[calMonth]+" "+calYear);
+    const nextBtn = el("button",{},"→");
+    nextBtn.onclick = ()=>{ calMonth++; if(calMonth>11){ calMonth=0; calYear++; } selectedCalDate=null; render(); };
+    header.appendChild(prevBtn); header.appendChild(label); header.appendChild(nextBtn);
+    screen.appendChild(header);
+
+    const grid = el("div",{class:"cal-grid"});
+    ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].forEach(d=> grid.appendChild(el("div",{class:"cal-dow"},d)));
+
+    const firstDay = new Date(calYear, calMonth, 1);
+    const startOffset = firstDay.getDay();
+    const daysInMonth = new Date(calYear, calMonth+1, 0).getDate();
+    const totals = dayTotalsMap(comp.id, calYear, calMonth);
+    const todayS = todayStr();
+
+    for(let i=0;i<startOffset;i++) grid.appendChild(el("div",{class:"cal-cell empty"}));
+    for(let d=1; d<=daysInMonth; d++){
+      const dateStr = calYear+"-"+String(calMonth+1).padStart(2,"0")+"-"+String(d).padStart(2,"0");
+      const t = totals[dateStr];
+      const net = t ? (t.in - t.out) : 0;
+      const cell = el("div",{class:"cal-cell"+(dateStr===todayS?" today":"")+(dateStr===selectedCalDate?" selected":"")});
+      cell.appendChild(el("div",{class:"cal-daynum"}, String(d)));
+      if(t){
+        cell.appendChild(el("div",{class:"cal-net "+(net>=0?"in":"out")}, (net>=0?"+":"")+fmt(net)));
+      }
+      cell.onclick = ()=>{ selectedCalDate = dateStr; render(); };
+      grid.appendChild(cell);
+    }
+    screen.appendChild(grid);
+
+    if(selectedCalDate){
+      const panel = el("div",{class:"cal-day-panel"});
+      panel.appendChild(el("h2",{}, selectedCalDate));
+      const dayTx = companyTx(comp.id).filter(t=>t.date===selectedCalDate).sort((a,b)=>a.createdAt-b.createdAt);
+      if(dayTx.length===0){
+        panel.appendChild(el("div",{class:"empty-state"},[el("div",{class:"big"},"📅"), el("div",{class:"msg"},"No transactions on this date.")]));
+      } else {
+        let inT=0,outT=0; dayTx.forEach(t=>{ if(t.type==="in") inT+=t.amount; else outT+=t.amount; });
+        const summary = el("div",{class:"ledger-summary"});
+        summary.appendChild(el("div",{class:"cell"},[el("div",{class:"k"},"Total In"), el("div",{class:"v", style:"color:var(--green)"}, fmt(inT))]));
+        summary.appendChild(el("div",{class:"cell"},[el("div",{class:"k"},"Total Out"), el("div",{class:"v", style:"color:var(--maroon)"}, fmt(outT))]));
+        panel.appendChild(summary);
+        const pdfBtn = el("button",{class:"action-btn ghost", style:"width:100%;margin-bottom:12px;"},"🖨  PDF Report (Print)");
+        pdfBtn.onclick = ()=> exportDayPDF(comp, selectedCalDate, dayTx);
+        panel.appendChild(pdfBtn);
+        dayTx.forEach(t=> panel.appendChild(txRow(t)));
+      }
+      screen.appendChild(panel);
+    }
+  }
+
+  function renderLedgerList(screen, comp){
+    screen.appendChild(el("h1",{class:"page-title"},"Ledger — Party List"));
+    const toolbar = el("div",{class:"toolbar"});
+    const search = el("input",{class:"search-input", placeholder:"Search party...", value:searchQuery});
+    search.oninput = (e)=>{ searchQuery=e.target.value; fillLedgerList(); };
+    toolbar.appendChild(search);
+    screen.appendChild(toolbar);
+
+    const listWrap = el("div",{id:"ll-list"});
+    screen.appendChild(listWrap);
+    fillLedgerList();
+
+    function fillLedgerList(){
+      listWrap.innerHTML = "";
+      let parties = partiesOf(comp.id);
+      if(searchQuery.trim()){
+        const q = searchQuery.trim().toLowerCase();
+        parties = parties.filter(p=>p.toLowerCase().includes(q));
+      }
+      if(parties.length===0){
+        listWrap.appendChild(el("div",{class:"empty-state"},[el("div",{class:"big"},"📒"), el("div",{class:"msg"},"No parties yet.")]));
+        return;
+      }
+      parties.forEach(p=>{
+        const l = partyLedger(comp.id, p);
+        const phone = getPartyPhone(comp.id, p);
+        const row = el("div",{class:"row-card"});
+        row.onclick = ()=>{ ledgerParty=p; view="ledgerDetail"; render(); };
+        const nameCol = el("div",{class:"row-left"},[el("div",{class:"party"},p), el("div",{class:"sub"}, l.rows.length+" transactions")]);
+        row.appendChild(nameCol);
+        const rightWrap = el("div",{style:"display:flex;align-items:center;gap:8px;"});
+        if(phone){
+          const callBtn = el("a",{href:"tel:"+phone, class:"icon-btn", style:"color:var(--green);text-decoration:none;font-size:18px;"},"📞");
+          callBtn.onclick = (e)=> e.stopPropagation();
+          rightWrap.appendChild(callBtn);
+        }
+        rightWrap.appendChild(el("div",{class:"row-right"},[el("div",{class:"amt"+(l.closing<0?" out":" in")}, fmt(l.closing)), el("div",{class:"bal"},"Balance")]));
+        row.appendChild(rightWrap);
+        listWrap.appendChild(row);
+      });
+    }
+  }
+
+  function renderLedgerDetail(screen, comp){
+    const back = el("button",{class:"filter-chip"},"← Back");
+    back.onclick = ()=>{ view="ledgerList"; render(); };
+    screen.appendChild(back);
+    screen.appendChild(el("h1",{class:"page-title"}, ledgerParty));
+
+    const phone = getPartyPhone(comp.id, ledgerParty);
+    const phoneRow = el("div",{style:"display:flex;align-items:center;gap:10px;margin:-10px 0 14px 0;"});
+    if(phone){
+      const callLink = el("a",{href:"tel:"+phone, class:"action-btn ghost", style:"text-decoration:none;padding:8px 14px;font-size:13.5px;"},"📞  Call "+phone);
+      phoneRow.appendChild(callLink);
+    }
+    const editPhoneBtn = el("button",{class:"filter-chip"}, phone?"Change Number":"+ Add Mobile Number");
+    editPhoneBtn.onclick = ()=>{
+      const val = prompt("Enter party's mobile number:", phone||"");
+      if(val===null) return;
+      setPartyPhone(comp.id, ledgerParty, val.trim());
+      save();
+      render();
+    };
+    phoneRow.appendChild(editPhoneBtn);
+    screen.appendChild(phoneRow);
+
+    const l = partyLedger(comp.id, ledgerParty);
+    const summary = el("div",{class:"ledger-summary"});
+    summary.appendChild(el("div",{class:"cell"},[el("div",{class:"k"},"Total In"), el("div",{class:"v", style:"color:var(--green)"}, fmt(l.inTotal))]));
+    summary.appendChild(el("div",{class:"cell"},[el("div",{class:"k"},"Total Out"), el("div",{class:"v", style:"color:var(--maroon)"}, fmt(l.outTotal))]));
+    summary.appendChild(el("div",{class:"cell"},[el("div",{class:"k"},"Closing Balance"), el("div",{class:"v"}, fmt(l.closing))]));
+    summary.appendChild(el("div",{class:"cell"},[el("div",{class:"k"},"No. of Transactions"), el("div",{class:"v"}, String(l.rows.length))]));
+    screen.appendChild(summary);
+
+    if(l.rows.length>0){
+      const pdfBtn = el("button",{class:"action-btn ghost", style:"width:100%;margin:10px 0 4px 0;"},"🖨  PDF Report (Print)");
+      pdfBtn.onclick = ()=> exportLedgerPDF(comp, ledgerParty, l);
+      screen.appendChild(pdfBtn);
+    }
+
+    if(l.rows.length===0){
+      screen.appendChild(el("div",{class:"empty-state"},[el("div",{class:"big"},"📄"), el("div",{class:"msg"},"No transactions yet for this party.")]));
+      return;
+    }
+
+    const tableWrap = el("div",{style:"overflow-x:auto"});
+    const table = el("table",{class:"ledger-table"});
+    table.appendChild(el("thead",{},el("tr",{},[el("th",{},"Date"),el("th",{},"Remark"),el("th",{},"In"),el("th",{},"Out"),el("th",{},"Balance"),el("th",{},"")])));
+    const tbody = el("tbody");
+    l.rows.slice().reverse().forEach(t=>{
+      const tr = el("tr");
+      tr.appendChild(el("td",{},t.date));
+      tr.appendChild(el("td",{},t.remark||"-"));
+      tr.appendChild(el("td",{class:"num in"}, t.type==="in"?fmt(t.amount):""));
+      tr.appendChild(el("td",{class:"num out"}, t.type==="out"?fmt(t.amount):""));
+      tr.appendChild(el("td",{class:"num"}, fmt(t.running)));
+      const actions = el("div",{class:"row-actions"});
+      const editBtn = el("button",{},"✎"); editBtn.onclick=()=>{ editingTxId=t.id; entryType=t.type; view="entryForm"; render(); };
+      const delBtn = el("button",{},"🗑"); delBtn.onclick=()=>{ if(confirm("Delete this transaction?")){ deleteTx(t.id); render(); } };
+      actions.appendChild(editBtn); actions.appendChild(delBtn);
+      const tdA = el("td"); tdA.appendChild(actions);
+      tr.appendChild(tdA);
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    tableWrap.appendChild(table);
+    screen.appendChild(tableWrap);
+  }
+
+  function renderCompanyScreen(screen, comp){
+    screen.appendChild(el("h1",{class:"page-title"},"My Companies"));
+    data.companies.forEach(c=>{
+      const b = computeBalance(c.id);
+      const item = el("div",{class:"company-list-item"+(c.id===comp.id?" selected":"")});
+      item.appendChild(el("div",{},[el("div",{class:"name"},c.name), el("div",{class:"bal"},"Balance: "+fmt(b.balance))]));
+      const btns = el("div",{style:"display:flex;gap:6px;"});
+      const renameBtn = el("button",{class:"icon-btn", style:"color:var(--ink-soft)"},"Rename");
+      renameBtn.onclick = (e)=>{ e.stopPropagation(); data.activeCompanyId=c.id; view="renameCompany"; render(); };
+      btns.appendChild(renameBtn);
+      item.appendChild(btns);
+      item.onclick = ()=>{ data.activeCompanyId=c.id; save(); view="dashboard"; render(); };
+      screen.appendChild(item);
+    });
+    const addBtn = el("button",{class:"action-btn ghost", style:"width:100%;margin-top:10px;"},"+ Add New Company");
+    addBtn.onclick = ()=>{ view="addCompany"; render(); };
+    screen.appendChild(addBtn);
+  }
+
+  function renderAddCompany(screen){
+    const back = el("button",{class:"filter-chip"},"← Back");
+    back.onclick = ()=>{ view="company"; render(); };
+    screen.appendChild(back);
+    screen.appendChild(el("h1",{class:"page-title"},"Add New Company"));
+    const card = el("div",{class:"form-card"});
+    const nameField = el("div",{class:"field"},[el("label",{},"Company Name"), el("input",{id:"nc-name",placeholder:"e.g. ABC Traders"})]);
+    const balField = el("div",{class:"field"},[el("label",{},"Opening Balance"), el("div",{class:"amount-field"},[el("span",{class:"rs"},"₹"),el("input",{id:"nc-bal",type:"number",placeholder:"0"})])]);
+    card.appendChild(nameField); card.appendChild(balField);
+    const saveBtn = el("button",{class:"btn-primary green"},"Save Company");
+    saveBtn.onclick = ()=>{
+      const name = document.getElementById("nc-name").value.trim();
+      const balv = parseFloat(document.getElementById("nc-bal").value)||0;
+      if(!name){ alert("Please enter company name"); return; }
+      const id = uid();
+      data.companies.push({id, name, openingBalance: balv});
+      data.activeCompanyId = id;
+      logActivity("Added company: "+name);
+      save();
+      view = "dashboard";
+      render();
+    };
+    card.appendChild(saveBtn);
+    screen.appendChild(card);
+  }
+
+  function renderRenameCompany(screen, comp){
+    const back = el("button",{class:"filter-chip"},"← Back");
+    back.onclick = ()=>{ view="company"; render(); };
+    screen.appendChild(back);
+    screen.appendChild(el("h1",{class:"page-title"},"Rename Company"));
+    const card = el("div",{class:"form-card"});
+    card.appendChild(el("div",{class:"field"},[el("label",{},"Company Name"), el("input",{id:"rc-name", value:comp.name})]));
+    const saveBtn = el("button",{class:"btn-primary green"},"Save");
+    saveBtn.onclick = ()=>{
+      const name = document.getElementById("rc-name").value.trim();
+      if(!name){ alert("Please enter a name"); return; }
+      const oldName = comp.name;
+      comp.name = name; logActivity("Renamed company: "+oldName+" → "+name); save(); view="company"; render();
+    };
+    card.appendChild(saveBtn);
+    screen.appendChild(card);
+  }
+
+  function renderLogin(app){
+    const wrap = el("div",{class:"login-wrap"});
+    const card = el("div",{class:"login-card"});
+    card.appendChild(el("div",{class:"mark"},"R"));
+    card.appendChild(el("h1",{},"Rojmel Login"));
+    card.appendChild(el("div",{class:"sub"},"Sign in to continue"));
+    if(loginError) card.appendChild(el("div",{class:"login-error"}, loginError));
+    card.appendChild(el("div",{class:"field"},[el("label",{},"Username"), el("input",{id:"lg-user", autocomplete:"username", value:""})]));
+    card.appendChild(el("div",{class:"field"},[el("label",{},"Password"), el("input",{id:"lg-pass", type:"password", autocomplete:"current-password"})]));
+    const btn = el("button",{class:"btn-primary green", style:"width:100%;margin-top:6px;"},"Login");
+    function doLogin(){
+      const u = document.getElementById("lg-user").value.trim();
+      const p = document.getElementById("lg-pass").value;
+      const found = (data.users||[]).find(x=>x.username===u && x.password===p);
+      if(!found){ loginError = "Invalid username or password"; render(); return; }
+      currentUser = found;
+      loginError = "";
+      try{ sessionStorage.setItem("rojmel_session", JSON.stringify({username:found.username})); }catch(e){}
+      logActivity("Logged in");
+      save();
+      render();
+    }
+    btn.onclick = doLogin;
+    card.appendChild(btn);
+    wrap.appendChild(card);
+    setTimeout(()=>{
+      const uInp = document.getElementById("lg-user"); if(uInp) uInp.focus();
+      const pInp = document.getElementById("lg-pass");
+      [uInp,pInp].forEach(inp=>{ if(inp) inp.addEventListener("keydown", e=>{ if(e.key==="Enter") doLogin(); }); });
+    }, 30);
+    app.appendChild(wrap);
+  }
+
+  function renderUsers(screen){
+    screen.appendChild(el("h1",{class:"page-title"},"Users"));
+    (data.users||[]).forEach(u=>{
+      const row = el("div",{class:"user-row"});
+      row.appendChild(el("div",{},[el("div",{class:"u-name"},u.username), el("div",{class:"u-role"},u.role)]));
+      const actions = el("div",{class:"u-actions"});
+      const editBtn = el("button",{},"Edit");
+      editBtn.onclick = ()=>{ editingUserId = u.id; view="editUser"; render(); };
+      actions.appendChild(editBtn);
+      if(u.id !== currentUser.id){
+        const delBtn = el("button",{style:"color:var(--maroon)"},"Delete");
+        delBtn.onclick = ()=>{
+          const admins = data.users.filter(x=>x.role==="admin");
+          if(u.role==="admin" && admins.length<=1){ alert("Cannot delete the only admin."); return; }
+          if(!confirm("Delete user \""+u.username+"\"?")) return;
+          data.users = data.users.filter(x=>x.id!==u.id);
+          logActivity("Deleted user: "+u.username);
+          save();
+          render();
+        };
+        actions.appendChild(delBtn);
+      }
+      row.appendChild(actions);
+      screen.appendChild(row);
+    });
+    const addBtn = el("button",{class:"action-btn ghost", style:"width:100%;margin-top:12px;"},"+ Add New User");
+    addBtn.onclick = ()=>{ editingUserId = null; view="editUser"; render(); };
+    screen.appendChild(addBtn);
+  }
+
+  function renderEditUser(screen){
+    const editing = editingUserId ? data.users.find(u=>u.id===editingUserId) : null;
+    const back = el("button",{class:"filter-chip"},"← Back");
+    back.onclick = ()=>{ view="users"; render(); };
+    screen.appendChild(back);
+    screen.appendChild(el("h1",{class:"page-title"}, editing?"Edit User":"Add New User"));
+    const card = el("div",{class:"form-card"});
+    card.appendChild(el("div",{class:"field"},[el("label",{},"Username"), el("input",{id:"eu-user", value: editing?editing.username:""})]));
+    card.appendChild(el("div",{class:"field"},[el("label",{}, editing?"New Password (leave blank to keep current)":"Password"), el("input",{id:"eu-pass", type:"text", value:""})]));
+    const roleField = el("div",{class:"field"},[el("label",{},"Role")]);
+    const roleSelect = el("select",{id:"eu-role", style:"width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--paper-line);background:var(--card);font-size:14px;"});
+    roleSelect.appendChild(el("option",{value:"user"},"User"));
+    roleSelect.appendChild(el("option",{value:"admin"},"Admin"));
+    roleSelect.value = editing ? editing.role : "user";
+    roleField.appendChild(roleSelect);
+    card.appendChild(roleField);
+    const saveBtn = el("button",{class:"btn-primary green"}, editing?"Save Changes":"Create User");
+    saveBtn.onclick = ()=>{
+      const uname = document.getElementById("eu-user").value.trim();
+      const pass = document.getElementById("eu-pass").value;
+      const role = document.getElementById("eu-role").value;
+      if(!uname){ alert("Please enter a username"); return; }
+      const dup = data.users.find(x=>x.username===uname && (!editing || x.id!==editing.id));
+      if(dup){ alert("Username already exists"); return; }
+      if(editing){
+        const admins = data.users.filter(x=>x.role==="admin");
+        if(editing.role==="admin" && role!=="admin" && admins.length<=1){ alert("Cannot remove the only admin."); return; }
+        editing.username = uname;
+        if(pass) editing.password = pass;
+        editing.role = role;
+        logActivity("Updated user: "+uname);
+        if(currentUser.id===editing.id) currentUser = editing;
+      } else {
+        if(!pass){ alert("Please enter a password"); return; }
+        data.users.push({id: uid(), username: uname, password: pass, role});
+        logActivity("Created user: "+uname+" ("+role+")");
+      }
+      save();
+      view = "users";
+      render();
+    };
+    card.appendChild(saveBtn);
+    screen.appendChild(card);
+  }
+
+  function renderHistory(screen){
+    screen.appendChild(el("h1",{class:"page-title"},"Activity History"));
+    const log = data.activityLog || [];
+    if(log.length===0){
+      screen.appendChild(el("div",{class:"empty-state"},[el("div",{class:"big"},"🕘"), el("div",{class:"msg"},"No activity recorded yet.")]));
+      return;
+    }
+    log.forEach(entry=>{
+      const row = el("div",{class:"log-row"});
+      row.appendChild(el("div",{}, entry.action));
+      row.appendChild(el("div",{class:"log-meta"}, entry.user + " — " + new Date(entry.ts).toLocaleString("en-IN")));
+      screen.appendChild(row);
+    });
+  }
+
+  function deleteTx(id){
+    const t = data.transactions.find(x=>x.id===id);
+    data.transactions = data.transactions.filter(t=>t.id!==id);
+    if(t) logActivity("Deleted transaction: "+(t.type==="in"?"Cash In":"Cash Out")+" ₹"+t.amount+" — "+t.party+" ("+t.date+")");
+    save();
+  }
+
+  function renderEntryForm(screen, comp){
+    const editing = editingTxId ? data.transactions.find(t=>t.id===editingTxId) : null;
+    const type = editing ? editing.type : entryType;
+    const back = el("button",{class:"filter-chip"},"← Back");
+    back.onclick = ()=>{ view = editing ? "ledgerDetail" : "dashboard"; editingTxId=null; render(); };
+    screen.appendChild(back);
+    screen.appendChild(el("h1",{class:"page-title"}, (editing?"Edit Transaction — ":"") + (type==="in"?"Cash In":"Cash Out")));
+
+    const card = el("div",{class:"form-card"});
+    const dateField = el("div",{class:"field"},[el("label",{},"Date"), el("input",{id:"ef-date", type:"date", value: editing?editing.date:(lastUsedDate||todayStr())})]);
+    card.appendChild(dateField);
+
+    const partyField = el("div",{class:"field"},[el("label",{},"Party Name")]);
+    const partyInput = el("input",{id:"ef-party", placeholder:"Enter or select party name", value: editing?editing.party:"", autocomplete:"off"});
+    partyField.appendChild(partyInput);
+    const suggestBox = el("div",{id:"ef-suggest"});
+    partyField.appendChild(suggestBox);
+    const allParties = partiesOf(comp.id);
+    let suggestMatches = [];
+    let suggestIndex = -1;
+    function renderSuggestHighlight(){
+      const items = suggestBox.querySelectorAll(".party-suggest div");
+      items.forEach((d,i)=> d.classList.toggle("highlighted", i===suggestIndex));
+      if(suggestIndex>=0 && items[suggestIndex]) items[suggestIndex].scrollIntoView({block:"nearest"});
+    }
+    function selectParty(p){
+      partyInput.value = p;
+      suggestBox.innerHTML = "";
+      suggestMatches = []; suggestIndex = -1;
+      const existing = getPartyPhone(comp.id, p);
+      if(existing) phoneInput.value = existing;
+    }
+    function updateSuggest(){
+      const val = partyInput.value.trim().toLowerCase();
+      suggestBox.innerHTML = "";
+      suggestIndex = -1;
+      if(!val){ suggestMatches=[]; return; }
+      suggestMatches = allParties.filter(p=>p.toLowerCase().includes(val) && p.toLowerCase()!==val).slice(0,6);
+      if(suggestMatches.length===0) return;
+      const box = el("div",{class:"party-suggest"});
+      suggestMatches.forEach(p=>{
+        const d = el("div",{},p);
+        d.onclick = ()=> selectParty(p);
+        box.appendChild(d);
+      });
+      suggestBox.appendChild(box);
+    }
+    partyInput.oninput = updateSuggest;
+    partyInput.onfocus = updateSuggest;
+    partyInput.addEventListener("keydown", (e)=>{
+      if(suggestMatches.length===0) return;
+      if(e.key==="ArrowDown"){
+        e.preventDefault();
+        suggestIndex = (suggestIndex+1) % suggestMatches.length;
+        renderSuggestHighlight();
+      } else if(e.key==="ArrowUp"){
+        e.preventDefault();
+        suggestIndex = (suggestIndex-1+suggestMatches.length) % suggestMatches.length;
+        renderSuggestHighlight();
+      } else if(e.key==="Enter"){
+        if(suggestIndex>=0){
+          e.preventDefault();
+          selectParty(suggestMatches[suggestIndex]);
+        }
+      } else if(e.key==="Escape"){
+        suggestBox.innerHTML=""; suggestMatches=[]; suggestIndex=-1;
+      }
+    });
+    partyInput.addEventListener("blur", ()=> setTimeout(()=>{ suggestBox.innerHTML=""; suggestMatches=[]; suggestIndex=-1; }, 150));
+    card.appendChild(partyField);
+
+    const phoneField = el("div",{class:"field"},[el("label",{},"Party Mobile Number (optional)")]);
+    const phoneInput = el("input",{id:"ef-phone", type:"tel", placeholder:"e.g. 9876543210", value: editing?getPartyPhone(comp.id, editing.party):(partyInput.value?getPartyPhone(comp.id, partyInput.value):"")});
+    phoneField.appendChild(phoneInput);
+    card.appendChild(phoneField);
+    partyInput.addEventListener("change", ()=>{
+      const existing = getPartyPhone(comp.id, partyInput.value.trim());
+      if(existing) phoneInput.value = existing;
+    });
+
+    const amtField = el("div",{class:"field"},[el("label",{},"Amount"), el("div",{class:"amount-field"},[el("span",{class:"rs"},"₹"), el("input",{id:"ef-amt", type:"number", step:"0.01", placeholder:"0", value: editing?editing.amount:""})])]);
+    card.appendChild(amtField);
+
+    const remarkField = el("div",{class:"field"},[el("label",{},"Remark (optional)"), el("input",{id:"ef-remark", placeholder:"e.g. Medicine sale", value: editing?(editing.remark||""):""})]);
+    card.appendChild(remarkField);
+
+    const saveBtn = el("button",{class:"btn-primary "+(type==="in"?"green":"maroon")}, editing?"Update":"Save");
+    saveBtn.onclick = ()=>{
+      const dateV = document.getElementById("ef-date").value || todayStr();
+      const partyV = document.getElementById("ef-party").value.trim();
+      const amtV = parseFloat(document.getElementById("ef-amt").value);
+      const remarkV = document.getElementById("ef-remark").value.trim();
+      const phoneV = document.getElementById("ef-phone").value.trim();
+      if(!partyV){ alert("Please enter party name"); return; }
+      if(!amtV || amtV<=0){ alert("Please enter a valid amount"); return; }
+      setPartyPhone(comp.id, partyV, phoneV);
+      if(editing){
+        editing.date=dateV; editing.party=partyV; editing.amount=amtV; editing.remark=remarkV;
+        logActivity("Edited transaction: "+(type==="in"?"Cash In":"Cash Out")+" ₹"+amtV+" — "+partyV+" ("+dateV+")");
+      } else {
+        data.transactions.push({ id: uid(), companyId: comp.id, type, date: dateV, party: partyV, amount: amtV, remark: remarkV, createdAt: Date.now() });
+        logActivity("Added transaction: "+(type==="in"?"Cash In":"Cash Out")+" ₹"+amtV+" — "+partyV+" ("+dateV+")");
+      }
+      save();
+      lastUsedDate = dateV;
+      editingTxId = null;
+      view = "dashboard";
+      render();
+    };
+    card.appendChild(saveBtn);
+
+    if(!editing){
+      const saveAddBtn = el("button",{class:"btn-secondary"}, "✔ Save & Add Another");
+      saveAddBtn.onclick = ()=>{
+        const dateV = document.getElementById("ef-date").value || todayStr();
+        const partyV = document.getElementById("ef-party").value.trim();
+        const amtV = parseFloat(document.getElementById("ef-amt").value);
+        const remarkV = document.getElementById("ef-remark").value.trim();
+        const phoneV = document.getElementById("ef-phone").value.trim();
+        if(!partyV){ alert("Please enter party name"); return; }
+        if(!amtV || amtV<=0){ alert("Please enter a valid amount"); return; }
+        setPartyPhone(comp.id, partyV, phoneV);
+        data.transactions.push({ id: uid(), companyId: comp.id, type, date: dateV, party: partyV, amount: amtV, remark: remarkV, createdAt: Date.now() });
+        logActivity("Added transaction: "+(type==="in"?"Cash In":"Cash Out")+" ₹"+amtV+" — "+partyV+" ("+dateV+")");
+        save();
+        lastUsedDate = dateV;
+        entryType = type;
+        editingTxId = null;
+        view = "entryForm";
+        render();
+        setTimeout(()=>{ const p = document.getElementById("ef-party"); if(p) p.focus(); }, 30);
+      };
+      card.appendChild(saveAddBtn);
+    }
+
+    if(editing){
+      const delBtn = el("button",{class:"btn-secondary", style:"color:var(--maroon)"},"Delete This Transaction");
+      delBtn.onclick = ()=>{
+        if(confirm("Permanently delete this transaction?")){
+          deleteTx(editing.id);
+          editingTxId=null;
+          view="ledgerDetail";
+          render();
+        }
+      };
+      card.appendChild(delBtn);
+    }
+
+    screen.appendChild(card);
+    setTimeout(()=>{ const d = document.getElementById("ef-date"); if(d && !editing) d.focus(); }, 30);
+  }
+
+  function renderEntryChoiceOverlay(app){
+    const ov = el("div",{class:"overlay"});
+    ov.onclick = (e)=>{ if(e.target===ov){ overlay=null; render(); } };
+    const sheet = el("div",{class:"sheet"});
+    sheet.appendChild(el("div",{class:"sheet-handle"}));
+    sheet.appendChild(el("h2",{},"New Entry"));
+    const choice = el("div",{class:"entry-choice"});
+    const inBtn = el("button",{class:"in"},"➕ Cash In");
+    inBtn.onclick = ()=>{ entryType="in"; editingTxId=null; view="entryForm"; overlay=null; render(); };
+    const outBtn = el("button",{class:"out"},"➖ Cash Out");
+    outBtn.onclick = ()=>{ entryType="out"; editingTxId=null; view="entryForm"; overlay=null; render(); };
+    choice.appendChild(inBtn); choice.appendChild(outBtn);
+    sheet.appendChild(choice);
+    ov.appendChild(sheet);
+    app.appendChild(ov);
+  }
+
+  function renderCompanySwitchOverlay(app){
+    const ov = el("div",{class:"overlay"});
+    ov.onclick = (e)=>{ if(e.target===ov){ overlay=null; render(); } };
+    const sheet = el("div",{class:"sheet"});
+    sheet.appendChild(el("div",{class:"sheet-handle"}));
+    sheet.appendChild(el("h2",{},"Select Company"));
+    data.companies.forEach(c=>{
+      const b = computeBalance(c.id);
+      const item = el("div",{class:"company-list-item"+(c.id===data.activeCompanyId?" selected":"")});
+      item.appendChild(el("div",{},[el("div",{class:"name"},c.name), el("div",{class:"bal"},"Balance: "+fmt(b.balance))]));
+      item.onclick = ()=>{ data.activeCompanyId=c.id; save(); overlay=null; view="dashboard"; render(); };
+      sheet.appendChild(item);
+    });
+    const addBtn = el("button",{class:"action-btn ghost", style:"width:100%;margin-top:6px;"},"+ Add New Company");
+    addBtn.onclick = ()=>{ overlay=null; view="addCompany"; render(); };
+    sheet.appendChild(addBtn);
+    ov.appendChild(sheet);
+    app.appendChild(ov);
+  }
+
+  // ---------------- init ----------------
+  (async function init(){
+    render();
+    await loadData();
+    try{
+      const sess = JSON.parse(sessionStorage.getItem("rojmel_session")||"null");
+      if(sess && sess.username){
+        const found = data.users.find(u=>u.username===sess.username);
+        if(found) currentUser = found;
+      }
+    }catch(e){}
+    render();
+  })();
+
+})();
+</script>
+</body>
+</html>
