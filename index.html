@@ -483,6 +483,7 @@
   let currentUser = null;
   let loginError = "";
   let editingUserId = null;
+  let advSearchQuery = "";
 
   function activeCompany(){ return data.companies.find(c=>c.id===data.activeCompanyId); }
   function companyTx(companyId){ return data.transactions.filter(t=>t.companyId===companyId); }
@@ -692,6 +693,7 @@
       ["entryOut","➖","Cash Out"],
       ["cashflow","📄","Cash Flow"],
       ["calendar","📅","Calendar"],
+      ["search","🔍","Advanced Search"],
       ["ledgerList","📒","Ledger"],
       ["company","🏢","Company"],
     ];
@@ -745,6 +747,7 @@
     if(view==="dashboard") renderDashboard(screen, comp, bal);
     else if(view==="cashflow") renderCashflow(screen, comp);
     else if(view==="calendar") renderCalendar(screen, comp);
+    else if(view==="search") renderSearch(screen, comp);
     else if(view==="ledgerList") renderLedgerList(screen, comp);
     else if(view==="ledgerDetail") renderLedgerDetail(screen, comp);
     else if(view==="company") renderCompanyScreen(screen, comp);
@@ -764,6 +767,7 @@
       ["cashflow","📄","Cash Flow"],
       ["calendar","📅","Calendar"],
       ["__fab__","",""],
+      ["search","🔍","Search"],
       ["ledgerList","📒","Ledger"],
       ["company","🏢","Company"],
     ];
@@ -786,6 +790,7 @@
     // overlays
     if(overlay==="entryChoice") renderEntryChoiceOverlay(app);
     if(overlay==="companySwitch") renderCompanySwitchOverlay(app);
+    if(overlay==="searchPdfChoice") renderSearchPdfChoiceOverlay(app, comp);
   }
 
   function renderDashboard(screen, comp, bal){
@@ -982,6 +987,114 @@
       }
       screen.appendChild(panel);
     }
+  }
+
+  // ---------------- Advanced Search ----------------
+  function getAdvSearchMatches(companyId){
+    const q = advSearchQuery.trim().toLowerCase();
+    if(!q) return [];
+    return companyTx(companyId).filter(t=>{
+      const typeWords = t.type==="in" ? "in cash in credit" : "out cash out debit";
+      const hay = [t.party, t.remark||"", t.date, typeWords, String(t.amount)].join(" ").toLowerCase();
+      return hay.includes(q);
+    }).sort((a,b)=> b.date===a.date ? (b.createdAt-a.createdAt) : b.date.localeCompare(a.date));
+  }
+
+  function exportSearchDetailedPDF(comp, matches, query){
+    const rows = matches.map(t=>[t.date, t.party, t.remark||"-", t.type==="in"?fmt(t.amount):"", t.type==="out"?fmt(t.amount):""]);
+    let inT=0,outT=0; matches.forEach(t=>{ if(t.type==="in") inT+=t.amount; else outT+=t.amount; });
+    openPrintReport({
+      title: "Search Report (Detailed) — \""+query+"\"",
+      companyName: comp.name,
+      summaryLines: [matches.length+" transactions found", "Total In: "+fmt(inT)+"   Total Out: "+fmt(outT)+"   Net: "+fmt(inT-outT)],
+      head: ["Date","Party","Remark","In","Out"],
+      rows
+    });
+  }
+
+  function exportSearchSummaryPDF(comp, matches, query){
+    const map = {};
+    matches.forEach(t=>{
+      if(!map[t.party]) map[t.party] = {count:0, in:0, out:0};
+      map[t.party].count++;
+      if(t.type==="in") map[t.party].in += t.amount; else map[t.party].out += t.amount;
+    });
+    const rows = Object.keys(map).sort((a,b)=>a.localeCompare(b)).map(p=>[
+      p, String(map[p].count), fmt(map[p].in), fmt(map[p].out), fmt(map[p].in-map[p].out)
+    ]);
+    let inT=0,outT=0; matches.forEach(t=>{ if(t.type==="in") inT+=t.amount; else outT+=t.amount; });
+    openPrintReport({
+      title: "Search Report (Summary) — \""+query+"\"",
+      companyName: comp.name,
+      summaryLines: [matches.length+" transactions found across "+Object.keys(map).length+" parties", "Total In: "+fmt(inT)+"   Total Out: "+fmt(outT)+"   Net: "+fmt(inT-outT)],
+      head: ["Party","Transactions","In","Out","Net"],
+      rows
+    });
+  }
+
+  function renderSearch(screen, comp){
+    screen.appendChild(el("h1",{class:"page-title"},"Advanced Search"));
+    const toolbar = el("div",{class:"toolbar"});
+    const search = el("input",{class:"search-input", placeholder:"Search anything — party, remark, amount, date, in/out...", value:advSearchQuery});
+    toolbar.appendChild(search);
+    screen.appendChild(toolbar);
+
+    const infoWrap = el("div",{id:"adv-info"});
+    screen.appendChild(infoWrap);
+
+    const pdfBtnWrap = el("div",{id:"adv-pdf-wrap"});
+    screen.appendChild(pdfBtnWrap);
+
+    const listWrap = el("div",{id:"adv-list"});
+    screen.appendChild(listWrap);
+
+    function fillAdv(){
+      const matches = getAdvSearchMatches(comp.id);
+      infoWrap.innerHTML = "";
+      pdfBtnWrap.innerHTML = "";
+      listWrap.innerHTML = "";
+
+      if(!advSearchQuery.trim()){
+        listWrap.appendChild(el("div",{class:"empty-state"},[el("div",{class:"big"},"🔍"), el("div",{class:"msg"},"Type anything to search across all your transactions.")]));
+        return;
+      }
+      if(matches.length===0){
+        listWrap.appendChild(el("div",{class:"empty-state"},[el("div",{class:"big"},"🔍"), el("div",{class:"msg"},"No matching transactions found.")]));
+        return;
+      }
+      let inT=0,outT=0; matches.forEach(t=>{ if(t.type==="in") inT+=t.amount; else outT+=t.amount; });
+      infoWrap.appendChild(el("div",{class:"recent-title"}, matches.length+" results — In "+fmt(inT)+"  ·  Out "+fmt(outT)));
+
+      const pdfBtn = el("button",{class:"action-btn ghost", style:"width:100%;margin-bottom:12px;"},"🖨  Export PDF");
+      pdfBtn.onclick = ()=>{ overlay="searchPdfChoice"; render(); };
+      pdfBtnWrap.appendChild(pdfBtn);
+
+      matches.forEach(t=> listWrap.appendChild(txRow(t)));
+    }
+
+    search.oninput = (e)=>{ advSearchQuery = e.target.value; fillAdv(); };
+    fillAdv();
+    setTimeout(()=>{ search.focus(); }, 30);
+  }
+
+  function renderSearchPdfChoiceOverlay(app, comp){
+    const matches = getAdvSearchMatches(comp.id);
+    const query = advSearchQuery.trim();
+    const ov = el("div",{class:"overlay center"});
+    ov.onclick = (e)=>{ if(e.target===ov){ overlay=null; render(); } };
+    const sheet = el("div",{class:"sheet"});
+    sheet.appendChild(el("div",{class:"sheet-handle"}));
+    sheet.appendChild(el("h2",{},"Export Search Results"));
+    sheet.appendChild(el("div",{style:"font-size:13px;color:var(--ink-soft);margin:-10px 0 16px 0;"}, "Choose the report type for \""+query+"\""));
+    const choice = el("div",{class:"entry-choice"});
+    const summaryBtn = el("button",{class:"in"},"📊 Summary");
+    summaryBtn.onclick = ()=>{ overlay=null; exportSearchSummaryPDF(comp, matches, query); render(); };
+    const detailedBtn = el("button",{class:"out"},"📋 Detailed");
+    detailedBtn.onclick = ()=>{ overlay=null; exportSearchDetailedPDF(comp, matches, query); render(); };
+    choice.appendChild(summaryBtn); choice.appendChild(detailedBtn);
+    sheet.appendChild(choice);
+    ov.appendChild(sheet);
+    app.appendChild(ov);
   }
 
   function renderLedgerList(screen, comp){
