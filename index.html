@@ -1407,6 +1407,15 @@
     screen.appendChild(back);
     screen.appendChild(el("h1",{class:"page-title"}, (editing?"Edit Transaction — ":"") + (type==="in"?"Cash In":"Cash Out")));
 
+    if(editing){
+      const metaLine = el("div",{style:"font-size:12.5px;color:var(--ink-soft);margin:-12px 0 16px 0;"});
+      let metaText = "Created by " + (editing.createdBy || "Unknown");
+      if(editing.createdAt) metaText += " on " + new Date(editing.createdAt).toLocaleString("en-IN");
+      if(editing.updatedBy) metaText += "  ·  Last edited by " + editing.updatedBy + (editing.updatedAt ? " on " + new Date(editing.updatedAt).toLocaleString("en-IN") : "");
+      metaLine.textContent = metaText;
+      screen.appendChild(metaLine);
+    }
+
     const card = el("div",{class:"form-card"});
     const dateField = el("div",{class:"field"},[el("label",{},"Date"), el("input",{id:"ef-date", type:"date", value: editing?editing.date:(lastUsedDate||todayStr())})]);
     card.appendChild(dateField);
@@ -1497,9 +1506,11 @@
       setPartyPhone(comp.id, partyV, phoneV);
       if(editing){
         editing.date=dateV; editing.party=partyV; editing.amount=amtV; editing.remark=remarkV;
+        editing.updatedBy = currentUser.username;
+        editing.updatedAt = Date.now();
         logActivity("Edited transaction: "+(type==="in"?"Cash In":"Cash Out")+" ₹"+amtV+" — "+partyV+" ("+dateV+")");
       } else {
-        data.transactions.push({ id: uid(), companyId: comp.id, type, date: dateV, party: partyV, amount: amtV, remark: remarkV, createdAt: Date.now() });
+        data.transactions.push({ id: uid(), companyId: comp.id, type, date: dateV, party: partyV, amount: amtV, remark: remarkV, createdAt: Date.now(), createdBy: currentUser.username });
         logActivity("Added transaction: "+(type==="in"?"Cash In":"Cash Out")+" ₹"+amtV+" — "+partyV+" ("+dateV+")");
       }
       save();
@@ -1521,7 +1532,7 @@
         if(!partyV){ alert("Please enter party name"); return; }
         if(!amtV || amtV<=0){ alert("Please enter a valid amount"); return; }
         setPartyPhone(comp.id, partyV, phoneV);
-        data.transactions.push({ id: uid(), companyId: comp.id, type, date: dateV, party: partyV, amount: amtV, remark: remarkV, createdAt: Date.now() });
+        data.transactions.push({ id: uid(), companyId: comp.id, type, date: dateV, party: partyV, amount: amtV, remark: remarkV, createdAt: Date.now(), createdBy: currentUser.username });
         logActivity("Added transaction: "+(type==="in"?"Cash In":"Cash Out")+" ₹"+amtV+" — "+partyV+" ("+dateV+")");
         save();
         lastUsedDate = dateV;
