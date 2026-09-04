@@ -179,6 +179,7 @@
   .row-card:hover{ border-color:var(--green); }
   .row-left{ display:flex; flex-direction:column; gap:2px; }
   .row-left .party{ font-weight:600; font-size:14.5px; }
+  .row-left .sr-no{ font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:700; color:var(--mustard); }
   .row-left .sub{ font-size:12px; color:var(--ink-soft); }
   .row-right{ text-align:right; }
   .row-right .amt{ font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:15px; }
@@ -831,15 +832,18 @@
     if(recent.length===0){
       screen.appendChild(el("div",{class:"empty-state"},[el("div",{class:"big"},"📗"), el("div",{class:"msg"},"No transactions yet. Tap + to get started.")]));
     } else {
-      recent.forEach(t=> screen.appendChild(txRow(t)));
+      recent.forEach((t,i)=> screen.appendChild(txRow(t, false, null, i+1)));
     }
   }
 
-  function txRow(t, showBalance, balMap){
+  function txRow(t, showBalance, balMap, srNo){
     const row = el("div",{class:"row-card"});
     row.onclick = ()=>{ editingTxId=t.id; entryType=t.type; view="entryForm"; render(); };
     const left = el("div",{class:"row-left"},[
-      el("div",{class:"party"}, t.party),
+      el("div",{},[
+        srNo!=null ? el("span",{class:"sr-no"}, "#"+srNo+"  ") : null,
+        el("span",{class:"party"}, t.party)
+      ]),
       el("div",{class:"sub"}, t.date + (t.remark? " · "+t.remark : ""))
     ]);
     const right = el("div",{class:"row-right"});
@@ -904,7 +908,7 @@
       container.appendChild(el("div",{class:"empty-state"},[el("div",{class:"big"},"🔍"), el("div",{class:"msg"},"No transactions found.")]));
       return;
     }
-    tx.forEach(t=> container.appendChild(txRow(t, true, balMap)));
+    tx.forEach((t,i)=> container.appendChild(txRow(t, true, balMap, i+1)));
   }
 
   function dayTotalsMap(companyId, year, month){
@@ -983,7 +987,7 @@
         const pdfBtn = el("button",{class:"action-btn ghost", style:"width:100%;margin-bottom:12px;"},"🖨  PDF Report (Print)");
         pdfBtn.onclick = ()=> exportDayPDF(comp, selectedCalDate, dayTx);
         panel.appendChild(pdfBtn);
-        dayTx.forEach(t=> panel.appendChild(txRow(t)));
+        dayTx.forEach((t,i)=> panel.appendChild(txRow(t, false, null, i+1)));
       }
       screen.appendChild(panel);
     }
@@ -1069,7 +1073,7 @@
       pdfBtn.onclick = ()=>{ overlay="searchPdfChoice"; render(); };
       pdfBtnWrap.appendChild(pdfBtn);
 
-      matches.forEach(t=> listWrap.appendChild(txRow(t)));
+      matches.forEach((t,i)=> listWrap.appendChild(txRow(t, false, null, i+1)));
     }
 
     search.oninput = (e)=>{ advSearchQuery = e.target.value; fillAdv(); };
@@ -1184,10 +1188,11 @@
 
     const tableWrap = el("div",{style:"overflow-x:auto"});
     const table = el("table",{class:"ledger-table"});
-    table.appendChild(el("thead",{},el("tr",{},[el("th",{},"Date"),el("th",{},"Remark"),el("th",{},"In"),el("th",{},"Out"),el("th",{},"Balance"),el("th",{},"")])));
+    table.appendChild(el("thead",{},el("tr",{},[el("th",{},"Sr."),el("th",{},"Date"),el("th",{},"Remark"),el("th",{},"In"),el("th",{},"Out"),el("th",{},"Balance"),el("th",{},"")])));
     const tbody = el("tbody");
-    l.rows.slice().reverse().forEach(t=>{
+    l.rows.slice().reverse().forEach((t,i)=>{
       const tr = el("tr");
+      tr.appendChild(el("td",{},String(i+1)));
       tr.appendChild(el("td",{},t.date));
       tr.appendChild(el("td",{},t.remark||"-"));
       tr.appendChild(el("td",{class:"num in"}, t.type==="in"?fmt(t.amount):""));
