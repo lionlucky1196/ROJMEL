@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Tiro+Devanagari+Marathi:ital@0;1&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
   :root{
     --paper:#F6F1E4;
@@ -670,6 +671,181 @@
     return map;
   }
 
+  // ---------------- Export / Backup ----------------
+  let expScope = "current"; // current | all
+  let expFrom = "";
+  let expTo = "";
+  let expParty = "";
+  let expType = "all"; // all | in | out
+
+  function getExportTx(){
+    let tx = expScope==="all" ? data.transactions.slice() : companyTx(activeCompany().id).slice();
+    if(expFrom) tx = tx.filter(t=>t.date >= expFrom);
+    if(expTo) tx = tx.filter(t=>t.date <= expTo);
+    if(expParty.trim()) tx = tx.filter(t=>t.party.toLowerCase().includes(expParty.trim().toLowerCase()));
+    if(expType!=="all") tx = tx.filter(t=>t.type===expType);
+    tx.sort((a,b)=> a.date===b.date ? (a.createdAt-b.createdAt) : a.date.localeCompare(b.date));
+    return tx;
+  }
+
+  function companyNameOf(id){ const c=data.companies.find(x=>x.id===id); return c?c.name:"Unknown"; }
+
+  function exportFilteredExcel(){
+    const tx = getExportTx();
+    if(tx.length===0){ alert("No transactions match these filters."); return; }
+    if(typeof XLSX === "undefined"){ alert("Excel library failed to load. Check your internet connection."); return; }
+    const rows = tx.map((t,i)=>({
+      "Sr.": i+1,
+      "Date": t.date,
+      "Company": companyNameOf(t.companyId),
+      "Party": t.party,
+      "Type": t.type==="in" ? "Cash In" : "Cash Out",
+      "In": t.type==="in" ? t.amount : "",
+      "Out": t.type==="out" ? t.amount : "",
+      "Remark": t.remark || "",
+      "Created By": t.createdBy || ""
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws["!cols"] = [{wch:5},{wch:12},{wch:20},{wch:20},{wch:10},{wch:12},{wch:12},{wch:26},{wch:14}];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Transactions");
+    const fname = "Rojmel_Transactions_"+todayStr()+".xlsx";
+    XLSX.writeFile(wb, fname);
+    logActivity("Exported transactions to Excel ("+tx.length+" rows)");
+    save();
+  }
+
+  function exportFilteredPDF(){
+    const tx = getExportTx();
+    if(tx.length===0){ alert("No transactions match these filters."); return; }
+    const rows = tx.slice().reverse().map(t=>[
+      t.date, companyNameOf(t.companyId), t.party, t.remark||"-",
+      t.type==="in"?fmt(t.amount):"", t.type==="out"?fmt(t.amount):""
+    ]);
+    let inT=0,outT=0; tx.forEach(t=>{ if(t.type==="in") inT+=t.amount; else outT+=t.amount; });
+    openPrintReport({
+      title: "Filtered Transactions Report",
+      companyName: expScope==="all" ? "All Companies" : activeCompany().name,
+      summaryLines: [tx.length+" transactions   ·   Total In: "+fmt(inT)+"   Total Out: "+fmt(outT)+"   Net: "+fmt(inT-outT)],
+      head: ["Date","Company","Party","Remark","In","Out"],
+      rows
+    });
+    logActivity("Exported transactions to PDF ("+tx.length+" rows)");
+    save();
+  }
+
+  function downloadBackup(){
+    const payload = { app:"rojmel", version:1, exportedAt: new Date().toISOString(), data };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {type:"application/json"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "rojmel_backup_"+todayStr()+".json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    logActivity("Downloaded full backup");
+    save();
+  }
+
+  function restoreBackupFromFile(file){
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      try{
+        const parsed = JSON.parse(reader.result);
+        const incoming = parsed && parsed.data ? parsed.data : parsed;
+        if(!incoming || !Array.isArray(incoming.companies) || !Array.isArray(incoming.transactions)){
+          alert("This file doesn't look like a valid Rojmel backup.");
+          return;
+        }
+        if(!confirm("Restoring will REPLACE all current data (companies, transactions, users, history) with the backup. Continue?")) return;
+        data = Object.assign({companies:[],transactions:[],activeCompanyId:null,partyPhones:{},users:[],activityLog:[]}, incoming);
+        if(!data.partyPhones) data.partyPhones = {};
+        if(!data.users || data.users.length===0) data.users = [{id: uid(), username:"admin", password:"123", role:"admin"}];
+        if(!data.activityLog) data.activityLog = [];
+        if(!data.activeCompanyId && data.companies.length) data.activeCompanyId = data.companies[0].id;
+        logActivity("Restored data from backup file");
+        save();
+        alert("Backup restored successfully.");
+        view = "dashboard";
+        render();
+      }catch(e){
+        alert("Could not read this file. Make sure it's a Rojmel backup JSON file.");
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  function renderExportBackup(screen, comp){
+    screen.appendChild(el("h1",{class:"page-title"},"Export & Backup"));
+
+    // ---- Export section ----
+    screen.appendChild(el("div",{class:"recent-title"},"Export Transactions"));
+    const card = el("div",{class:"form-card", style:"max-width:600px;"});
+
+    const scopeField = el("div",{class:"field"},[el("label",{},"Scope")]);
+    const scopeSelect = el("select",{id:"exp-scope"});
+    scopeSelect.appendChild(el("option",{value:"current"},"Current Company ("+comp.name+")"));
+    scopeSelect.appendChild(el("option",{value:"all"},"All Companies"));
+    scopeSelect.value = expScope;
+    scopeSelect.onchange = (e)=>{ expScope = e.target.value; };
+    scopeField.appendChild(scopeSelect);
+    card.appendChild(scopeField);
+
+    const rangeRow = el("div",{style:"display:grid;grid-template-columns:1fr 1fr;gap:12px;"});
+    const fromField = el("div",{class:"field"},[el("label",{},"From Date"), el("input",{id:"exp-from", type:"date", value:expFrom})]);
+    const toField = el("div",{class:"field"},[el("label",{},"To Date"), el("input",{id:"exp-to", type:"date", value:expTo})]);
+    rangeRow.appendChild(fromField); rangeRow.appendChild(toField);
+    card.appendChild(rangeRow);
+    fromField.querySelector("input").onchange = (e)=>{ expFrom = e.target.value; };
+    toField.querySelector("input").onchange = (e)=>{ expTo = e.target.value; };
+
+    const partyField = el("div",{class:"field"},[el("label",{},"Party (optional)"), el("input",{id:"exp-party", placeholder:"Filter by party name", value:expParty})]);
+    partyField.querySelector("input").oninput = (e)=>{ expParty = e.target.value; };
+    card.appendChild(partyField);
+
+    const typeField = el("div",{class:"field"},[el("label",{},"Type")]);
+    const typeSelect = el("select",{id:"exp-type"});
+    typeSelect.appendChild(el("option",{value:"all"},"All (In & Out)"));
+    typeSelect.appendChild(el("option",{value:"in"},"Cash In only"));
+    typeSelect.appendChild(el("option",{value:"out"},"Cash Out only"));
+    typeSelect.value = expType;
+    typeSelect.onchange = (e)=>{ expType = e.target.value; };
+    typeField.appendChild(typeSelect);
+    card.appendChild(typeField);
+
+    const btnRow = el("div",{style:"display:grid;grid-template-columns:1fr 1fr;gap:10px;"});
+    const xlsBtn = el("button",{class:"btn-primary green", style:"width:100%;"},"📊 Export to Excel");
+    xlsBtn.onclick = exportFilteredExcel;
+    const pdfBtn = el("button",{class:"btn-primary maroon", style:"width:100%;"},"🖨 Export to PDF");
+    pdfBtn.onclick = exportFilteredPDF;
+    btnRow.appendChild(xlsBtn); btnRow.appendChild(pdfBtn);
+    card.appendChild(btnRow);
+    screen.appendChild(card);
+
+    // ---- Backup section ----
+    screen.appendChild(el("div",{class:"recent-title", style:"margin-top:26px;"},"Backup & Restore"));
+    const bcard = el("div",{class:"form-card", style:"max-width:600px;"});
+    bcard.appendChild(el("div",{style:"font-size:13px;color:var(--ink-soft);margin-bottom:14px;"},
+      "Backup saves everything — all companies, transactions, users and history — into one file. Restoring will replace all current data with the backup."));
+    const backupBtn = el("button",{class:"btn-primary green"},"⬇ Download Full Backup");
+    backupBtn.onclick = downloadBackup;
+    bcard.appendChild(backupBtn);
+
+    const fileInput = el("input",{type:"file", accept:".json,application/json", style:"display:none;", id:"restore-file-input"});
+    fileInput.onchange = (e)=>{
+      const f = e.target.files && e.target.files[0];
+      if(f) restoreBackupFromFile(f);
+      e.target.value = "";
+    };
+    const restoreBtn = el("button",{class:"btn-secondary", style:"color:var(--maroon);"},"⬆ Restore From Backup File");
+    restoreBtn.onclick = ()=> fileInput.click();
+    bcard.appendChild(restoreBtn);
+    bcard.appendChild(fileInput);
+    screen.appendChild(bcard);
+  }
+
   // ---------------- render ----------------
   function render(){
     const app = document.getElementById("app");
@@ -696,6 +872,7 @@
       ["calendar","📅","Calendar"],
       ["search","🔍","Advanced Search"],
       ["ledgerList","📒","Ledger"],
+      ["exportBackup","⇅","Export / Backup"],
       ["company","🏢","Company"],
     ];
     if(currentUser.role==="admin"){
@@ -758,6 +935,7 @@
     else if(view==="users") renderUsers(screen);
     else if(view==="editUser") renderEditUser(screen);
     else if(view==="history") renderHistory(screen);
+    else if(view==="exportBackup") renderExportBackup(screen, comp);
     main.appendChild(screen);
     app.appendChild(main);
 
@@ -770,6 +948,7 @@
       ["__fab__","",""],
       ["search","🔍","Search"],
       ["ledgerList","📒","Ledger"],
+      ["exportBackup","⇅","Export"],
       ["company","🏢","Company"],
     ];
     if(currentUser.role==="admin"){
