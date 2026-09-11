@@ -798,6 +798,123 @@
     reader.readAsText(file);
   }
 
+  // ---------------- Bulk Import from Excel ----------------
+  const IMPORT_HEADERS = ["Date","Party","Type","Amount","Remark","Mobile Number"];
+
+  function downloadImportTemplate(){
+    if(typeof XLSX === "undefined"){ alert("Excel library failed to load. Check your internet connection."); return; }
+    const sampleRows = [
+      { "Date":"01-04-2025", "Party":"Ramesh Traders", "Type":"IN", "Amount":5000, "Remark":"Advance payment", "Mobile Number":"9876543210" },
+      { "Date":"02-04-2025", "Party":"Suresh Agro", "Type":"OUT", "Amount":1200, "Remark":"Fertilizer purchase", "Mobile Number":"" }
+    ];
+    const ws = XLSX.utils.json_to_sheet(sampleRows, {header: IMPORT_HEADERS});
+    ws["!cols"] = [{wch:14},{wch:22},{wch:10},{wch:12},{wch:26},{wch:16}];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Transactions");
+    const notesWs = XLSX.utils.aoa_to_sheet([
+      ["How to fill this template"],
+      ["Date", "Format: DD-MM-YYYY (e.g. 15-06-2025). YYYY-MM-DD also works."],
+      ["Party", "Name of the person/party (required)."],
+      ["Type", "Write IN (or Cash In / Credit) for cash received, OUT (or Cash Out / Debit) for cash paid (required)."],
+      ["Amount", "Numeric amount, greater than 0 (required)."],
+      ["Remark", "Optional note about the transaction."],
+      ["Mobile Number", "Optional — party's phone number."],
+      ["", ""],
+      ["Note:", "Do not change the column headers on the 'Transactions' sheet. Delete the two sample rows before importing your real data, or leave them — they will be imported too if left in."]
+    ]);
+    notesWs["!cols"] = [{wch:16},{wch:70}];
+    XLSX.utils.book_append_sheet(wb, notesWs, "Instructions");
+    XLSX.writeFile(wb, "Rojmel_Import_Template.xlsx");
+    logActivity("Downloaded bulk-import Excel template");
+    save();
+  }
+
+  function normalizeImportType(v){
+    const s = String(v==null?"":v).trim().toLowerCase();
+    if(["in","i","cash in","credit","received","cashin"].includes(s)) return "in";
+    if(["out","o","cash out","debit","paid","cashout"].includes(s)) return "out";
+    return null;
+  }
+
+  function parseImportDate(v){
+    if(v==null || v==="") return null;
+    // Excel serial date number
+    if(typeof v === "number"){
+      const parsed = XLSX.SSF ? XLSX.SSF.parse_date_code(v) : null;
+      if(parsed){
+        return parsed.y+"-"+String(parsed.m).padStart(2,"0")+"-"+String(parsed.d).padStart(2,"0");
+      }
+      return null;
+    }
+    const s = String(v).trim();
+    // YYYY-MM-DD
+    let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if(m) return m[1]+"-"+m[2].padStart(2,"0")+"-"+m[3].padStart(2,"0");
+    // DD-MM-YYYY or DD/MM/YYYY
+    m = s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
+    if(m) return m[3]+"-"+m[2].padStart(2,"0")+"-"+m[1].padStart(2,"0");
+    return null;
+  }
+
+  let lastImportSummary = null; // {imported, skipped:[{row, reason}]}
+
+  function importTransactionsFromFile(file, comp){
+    const reader = new FileReader();
+    reader.onload = (e)=>{
+      try{
+        if(typeof XLSX === "undefined"){ alert("Excel library failed to load. Check your internet connection."); return; }
+        const wb = XLSX.read(e.target.result, {type:"array", cellDates:false});
+        const sheetName = wb.SheetNames.find(n=>n.toLowerCase()==="transactions") || wb.SheetNames[0];
+        const ws = wb.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(ws, {defval:""});
+        if(rows.length===0){ alert("No rows found in the selected file."); return; }
+
+        let imported = 0;
+        const skipped = [];
+        rows.forEach((r, idx)=>{
+          const rowNum = idx+2; // header is row 1
+          const dateRaw = r["Date"] !== undefined ? r["Date"] : r["date"];
+          const partyRaw = r["Party"] !== undefined ? r["Party"] : r["party"];
+          const typeRaw = r["Type"] !== undefined ? r["Type"] : r["type"];
+          const amtRaw = r["Amount"] !== undefined ? r["Amount"] : r["amount"];
+          const remarkRaw = r["Remark"] !== undefined ? r["Remark"] : (r["remark"]||"");
+          const phoneRaw = r["Mobile Number"] !== undefined ? r["Mobile Number"] : (r["Mobile"]||r["Phone"]||"");
+
+          const party = String(partyRaw||"").trim();
+          const type = normalizeImportType(typeRaw);
+          const amount = parseFloat(amtRaw);
+          const dateV = parseImportDate(dateRaw);
+
+          if(!party && !typeRaw && !amtRaw && !dateRaw) return; // fully blank row, skip silently
+          if(!dateV){ skipped.push({row: rowNum, reason: "Invalid or missing Date"}); return; }
+          if(!party){ skipped.push({row: rowNum, reason: "Missing Party name"}); return; }
+          if(!type){ skipped.push({row: rowNum, reason: "Invalid or missing Type (use IN or OUT)"}); return; }
+          if(!amount || amount<=0){ skipped.push({row: rowNum, reason: "Invalid or missing Amount"}); return; }
+
+          const phone = String(phoneRaw||"").trim();
+          if(phone) setPartyPhone(comp.id, party, phone);
+
+          data.transactions.push({
+            id: uid(), companyId: comp.id, type, date: dateV, party,
+            amount, remark: String(remarkRaw||"").trim(),
+            createdAt: Date.now(), createdBy: currentUser.username
+          });
+          imported++;
+        });
+
+        if(imported>0){
+          logActivity("Bulk imported "+imported+" transaction(s) from Excel"+(skipped.length?(", "+skipped.length+" row(s) skipped"):""));
+          save();
+        }
+        lastImportSummary = {imported, skipped};
+        render();
+      }catch(err){
+        alert("Could not read this file. Please make sure it's a valid Excel (.xlsx) file matching the template.");
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
   function renderExportBackup(screen, comp){
     screen.appendChild(el("h1",{class:"page-title"},"Export & Backup"));
 
@@ -865,6 +982,47 @@
     bcard.appendChild(restoreBtn);
     bcard.appendChild(fileInput);
     screen.appendChild(bcard);
+
+    // ---- Bulk Import section ----
+    screen.appendChild(el("div",{class:"recent-title", style:"margin-top:26px;"},"Bulk Import Transactions"));
+    const icard = el("div",{class:"form-card", style:"max-width:600px;"});
+    icard.appendChild(el("div",{style:"font-size:13px;color:var(--ink-soft);margin-bottom:14px;"},
+      "Download the Excel template, fill in your transactions offline, then upload it here to add them all at once to \""+comp.name+"\". Date format: DD-MM-YYYY. Type: IN or OUT."));
+
+    const tmplBtn = el("button",{class:"btn-primary green"},"⬇ Download Excel Template");
+    tmplBtn.onclick = downloadImportTemplate;
+    icard.appendChild(tmplBtn);
+
+    const importFileInput = el("input",{type:"file", accept:".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", style:"display:none;", id:"import-file-input"});
+    importFileInput.onchange = (e)=>{
+      const f = e.target.files && e.target.files[0];
+      if(f) importTransactionsFromFile(f, comp);
+      e.target.value = "";
+    };
+    const importBtn = el("button",{class:"btn-secondary", style:"color:var(--green);"},"⬆ Upload Excel to Import");
+    importBtn.onclick = ()=> importFileInput.click();
+    icard.appendChild(importBtn);
+    icard.appendChild(importFileInput);
+    screen.appendChild(icard);
+
+    if(lastImportSummary){
+      const s = lastImportSummary;
+      const resCard = el("div",{class:"form-card", style:"max-width:600px;margin-top:12px;"});
+      resCard.appendChild(el("div",{style:"font-weight:700;font-size:14.5px;margin-bottom:8px;color:"+(s.imported>0?"var(--green)":"var(--maroon)")+";"},
+        "✔ "+s.imported+" transaction(s) imported"+(s.skipped.length?"   ·   ⚠ "+s.skipped.length+" row(s) skipped":"")));
+      if(s.skipped.length>0){
+        const list = el("div",{style:"font-size:12.5px;color:var(--ink-soft);max-height:180px;overflow-y:auto;"});
+        s.skipped.slice(0,30).forEach(sk=>{
+          list.appendChild(el("div",{style:"padding:3px 0;border-bottom:1px solid var(--paper-line);"}, "Row "+sk.row+": "+sk.reason));
+        });
+        if(s.skipped.length>30) list.appendChild(el("div",{style:"padding:3px 0;"}, "...and "+(s.skipped.length-30)+" more"));
+        resCard.appendChild(list);
+      }
+      const dismissBtn = el("button",{class:"filter-chip", style:"margin-top:10px;"},"Dismiss");
+      dismissBtn.onclick = ()=>{ lastImportSummary=null; render(); };
+      resCard.appendChild(dismissBtn);
+      screen.appendChild(resCard);
+    }
   }
 
   // ---------------- render ----------------
