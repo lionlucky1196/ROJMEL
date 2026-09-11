@@ -487,6 +487,17 @@
   let editingUserId = null;
   let advSearchQuery = "";
 
+  // ---- Ledger detail (party ledger) search & filter state ----
+  let ldSearchQuery = "";
+  let ldTypeFilter = "all"; // all | in | out
+  let ldDateFilter = "all"; // all | today | month | range
+  let ldFrom = "";
+  let ldTo = "";
+
+  function resetLedgerDetailFilters(){
+    ldSearchQuery = ""; ldTypeFilter = "all"; ldDateFilter = "all"; ldFrom = ""; ldTo = "";
+  }
+
   function activeCompany(){ return data.companies.find(c=>c.id===data.activeCompanyId); }
   function companyTx(companyId){ return data.transactions.filter(t=>t.companyId===companyId); }
 
@@ -1317,7 +1328,7 @@
         const l = partyLedger(comp.id, p);
         const phone = getPartyPhone(comp.id, p);
         const row = el("div",{class:"row-card"});
-        row.onclick = ()=>{ ledgerParty=p; view="ledgerDetail"; render(); };
+        row.onclick = ()=>{ ledgerParty=p; resetLedgerDetailFilters(); view="ledgerDetail"; render(); };
         const nameCol = el("div",{class:"row-left"},[el("div",{class:"party"},p), el("div",{class:"sub"}, l.rows.length+" transactions")]);
         row.appendChild(nameCol);
         const rightWrap = el("div",{style:"display:flex;align-items:center;gap:8px;"});
@@ -1331,6 +1342,33 @@
         listWrap.appendChild(row);
       });
     }
+  }
+
+  // ---- Ledger detail: apply search + filters on top of the party's rows ----
+  function getFilteredLedgerRows(allRows){
+    let rows = allRows.slice();
+    if(ldTypeFilter!=="all"){
+      rows = rows.filter(t=>t.type===ldTypeFilter);
+    }
+    if(ldDateFilter==="today"){
+      const t = todayStr();
+      rows = rows.filter(t2=>t2.date===t);
+    } else if(ldDateFilter==="month"){
+      const m = todayStr().slice(0,7);
+      rows = rows.filter(t2=>t2.date.slice(0,7)===m);
+    } else if(ldDateFilter==="range"){
+      if(ldFrom) rows = rows.filter(t2=>t2.date >= ldFrom);
+      if(ldTo) rows = rows.filter(t2=>t2.date <= ldTo);
+    }
+    if(ldSearchQuery.trim()){
+      const q = ldSearchQuery.trim().toLowerCase();
+      rows = rows.filter(t2=>{
+        const typeWords = t2.type==="in" ? "in cash in credit" : "out cash out debit";
+        const hay = [t2.remark||"", t2.date, typeWords, String(t2.amount)].join(" ").toLowerCase();
+        return hay.includes(q);
+      });
+    }
+    return rows;
   }
 
   function renderLedgerDetail(screen, comp){
@@ -1375,11 +1413,60 @@
       return;
     }
 
+    // ---- Advanced search + filter bar for this party's ledger ----
+    const toolbar = el("div",{class:"toolbar", style:"margin-top:16px;"});
+    const search = el("input",{class:"search-input", placeholder:"Search remark, date, amount, in/out...", value:ldSearchQuery});
+    toolbar.appendChild(search);
+    screen.appendChild(toolbar);
+
+    const chips = el("div",{class:"toolbar"});
+    [["all","All"],["in","Cash In"],["out","Cash Out"]].forEach(([id,label])=>{
+      const chip = el("button",{class:"filter-chip"+(ldTypeFilter===id?" active":"")}, label);
+      chip.onclick = ()=>{ ldTypeFilter=id; render(); };
+      chips.appendChild(chip);
+    });
+    [["all","All Dates"],["today","Today"],["month","This Month"],["range","Date Range"]].forEach(([id,label])=>{
+      const chip = el("button",{class:"filter-chip"+(ldDateFilter===id?" active":"")}, label);
+      chip.onclick = ()=>{ ldDateFilter=id; render(); };
+      chips.appendChild(chip);
+    });
+    screen.appendChild(chips);
+
+    if(ldDateFilter==="range"){
+      const rangeWrap = el("div",{class:"toolbar"});
+      const fromInput = el("input",{class:"search-input", type:"date", value:ldFrom});
+      fromInput.onchange = (e)=>{ ldFrom = e.target.value; render(); };
+      const toInput = el("input",{class:"search-input", type:"date", value:ldTo});
+      toInput.onchange = (e)=>{ ldTo = e.target.value; render(); };
+      rangeWrap.appendChild(fromInput);
+      rangeWrap.appendChild(toInput);
+      screen.appendChild(rangeWrap);
+    }
+
+    const filteredRows = getFilteredLedgerRows(l.rows);
+    const hasActiveFilter = ldSearchQuery.trim() || ldTypeFilter!=="all" || ldDateFilter!=="all";
+
+    if(hasActiveFilter){
+      let fIn=0, fOut=0;
+      filteredRows.forEach(t=>{ if(t.type==="in") fIn+=t.amount; else fOut+=t.amount; });
+      screen.appendChild(el("div",{class:"recent-title"}, filteredRows.length+" results — In "+fmt(fIn)+"  ·  Out "+fmt(fOut)));
+      const clearBtn = el("button",{class:"filter-chip", style:"margin-bottom:10px;"},"✕ Clear Filters");
+      clearBtn.onclick = ()=>{ resetLedgerDetailFilters(); render(); };
+      screen.appendChild(clearBtn);
+    }
+
+    if(filteredRows.length===0){
+      screen.appendChild(el("div",{class:"empty-state"},[el("div",{class:"big"},"🔍"), el("div",{class:"msg"},"No transactions match this search/filter.")]));
+      search.oninput = (e)=>{ ldSearchQuery = e.target.value; render(); };
+      setTimeout(()=>{ if(ldSearchQuery){ const s=document.querySelector(".search-input"); } }, 0);
+      return;
+    }
+
     const tableWrap = el("div",{style:"overflow-x:auto"});
     const table = el("table",{class:"ledger-table"});
     table.appendChild(el("thead",{},el("tr",{},[el("th",{},"Sr."),el("th",{},"Date"),el("th",{},"Remark"),el("th",{},"In"),el("th",{},"Out"),el("th",{},"Balance"),el("th",{},"")])));
     const tbody = el("tbody");
-    l.rows.slice().reverse().forEach((t,i)=>{
+    filteredRows.slice().reverse().forEach((t,i)=>{
       const tr = el("tr");
       tr.appendChild(el("td",{},String(i+1)));
       tr.appendChild(el("td",{}, fmtDate(t.date)));
@@ -1398,6 +1485,15 @@
     table.appendChild(tbody);
     tableWrap.appendChild(table);
     screen.appendChild(tableWrap);
+
+    search.oninput = (e)=>{ ldSearchQuery = e.target.value; render(); };
+    setTimeout(()=>{
+      const sInput = screen.querySelector(".search-input");
+      if(sInput && document.activeElement !== sInput && ldSearchQuery){
+        sInput.focus();
+        sInput.setSelectionRange(sInput.value.length, sInput.value.length);
+      }
+    }, 0);
   }
 
   function renderCompanyScreen(screen, comp){
