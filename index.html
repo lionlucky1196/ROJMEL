@@ -865,6 +865,27 @@
     return [t.date, String(t.party||"").trim().toLowerCase(), t.type, Number(t.amount)].join("|");
   }
 
+  // Build a lookup of a row's fields keyed by normalized (trimmed, lowercased) header name,
+  // so columns match even if the file has different casing, extra spaces, or a trailing "Rs"/"₹".
+  function normalizeImportHeaderKey(k){
+    return String(k==null?"":k).replace(/\uFEFF/g,"").trim().toLowerCase();
+  }
+  function getImportField(normalizedRow, ...names){
+    for(const n of names){
+      const v = normalizedRow[n];
+      if(v !== undefined && v !== null && String(v).trim() !== "") return v;
+    }
+    return undefined;
+  }
+  // Strips currency symbols, thousand-separator commas, and stray whitespace before parsing.
+  function parseImportAmount(v){
+    if(v==null || v==="") return NaN;
+    if(typeof v === "number") return v;
+    const s = String(v).trim().replace(/rs\.?/gi,"").replace(/₹/g,"").replace(/,/g,"").trim();
+    const n = parseFloat(s);
+    return isNaN(n) ? NaN : n;
+  }
+
   function importTransactionsFromFile(file, comp){
     const reader = new FileReader();
     reader.onload = (e)=>{
@@ -880,23 +901,28 @@
         const validRows = [];
         rows.forEach((r, idx)=>{
           const rowNum = idx+2; // header is row 1
-          const dateRaw = r["Date"] !== undefined ? r["Date"] : r["date"];
-          const partyRaw = r["Party"] !== undefined ? r["Party"] : r["party"];
-          const typeRaw = r["Type"] !== undefined ? r["Type"] : r["type"];
-          const amtRaw = r["Amount"] !== undefined ? r["Amount"] : r["amount"];
-          const remarkRaw = r["Remark"] !== undefined ? r["Remark"] : (r["remark"]||"");
-          const phoneRaw = r["Mobile Number"] !== undefined ? r["Mobile Number"] : (r["Mobile"]||r["Phone"]||"");
+
+          // Normalize this row's keys once so "Amount", "amount ", "AMOUNT" etc. all match.
+          const nr = {};
+          for(const k in r) nr[normalizeImportHeaderKey(k)] = r[k];
+
+          const dateRaw = getImportField(nr, "date");
+          const partyRaw = getImportField(nr, "party", "party name", "name");
+          const typeRaw = getImportField(nr, "type");
+          const amtRaw = getImportField(nr, "amount", "amt", "amount (rs)", "amount (₹)");
+          const remarkRaw = getImportField(nr, "remark", "remarks", "notes", "note") || "";
+          const phoneRaw = getImportField(nr, "mobile number", "mobile no", "mobile no.", "mobile", "phone", "phone number") || "";
 
           const party = String(partyRaw||"").trim();
           const type = normalizeImportType(typeRaw);
-          const amount = parseFloat(amtRaw);
+          const amount = parseImportAmount(amtRaw);
           const dateV = parseImportDate(dateRaw);
 
-          if(!party && !typeRaw && !amtRaw && !dateRaw) return; // fully blank row, skip silently
+          if(!party && !typeRaw && (amtRaw===undefined || amtRaw==="") && !dateRaw) return; // fully blank row, skip silently
           if(!dateV){ invalid.push({row: rowNum, reason: "Invalid or missing Date"}); return; }
           if(!party){ invalid.push({row: rowNum, reason: "Missing Party name"}); return; }
           if(!type){ invalid.push({row: rowNum, reason: "Invalid or missing Type (use IN or OUT)"}); return; }
-          if(!amount || amount<=0){ invalid.push({row: rowNum, reason: "Invalid or missing Amount"}); return; }
+          if(!amount || isNaN(amount) || amount<=0){ invalid.push({row: rowNum, reason: "Invalid or missing Amount (found: "+JSON.stringify(amtRaw)+")"}); return; }
 
           validRows.push({
             rowNum, date: dateV, party, type, amount,
