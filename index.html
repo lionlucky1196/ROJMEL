@@ -856,7 +856,14 @@
     return null;
   }
 
-  let lastImportSummary = null; // {imported, skipped:[{row, reason}]}
+  let lastImportSummary = null; // {imported, skipped:[{row, reason}], duplicates:[{row, reason}]}
+  let pendingImportReview = null; // {companyId, autoRows:[], reviewRows:[{...,checked}], duplicates:[], invalid:[]}
+
+  // Two entries are considered the exact same transaction if company, date, party (case/space
+  // insensitive), type and amount all match. Remark is intentionally ignored for this check.
+  function sameTxKey(t){
+    return [t.date, String(t.party||"").trim().toLowerCase(), t.type, Number(t.amount)].join("|");
+  }
 
   function importTransactionsFromFile(file, comp){
     const reader = new FileReader();
@@ -869,8 +876,8 @@
         const rows = XLSX.utils.sheet_to_json(ws, {defval:""});
         if(rows.length===0){ alert("No rows found in the selected file."); return; }
 
-        let imported = 0;
-        const skipped = [];
+        const invalid = [];
+        const validRows = [];
         rows.forEach((r, idx)=>{
           const rowNum = idx+2; // header is row 1
           const dateRaw = r["Date"] !== undefined ? r["Date"] : r["date"];
@@ -886,33 +893,118 @@
           const dateV = parseImportDate(dateRaw);
 
           if(!party && !typeRaw && !amtRaw && !dateRaw) return; // fully blank row, skip silently
-          if(!dateV){ skipped.push({row: rowNum, reason: "Invalid or missing Date"}); return; }
-          if(!party){ skipped.push({row: rowNum, reason: "Missing Party name"}); return; }
-          if(!type){ skipped.push({row: rowNum, reason: "Invalid or missing Type (use IN or OUT)"}); return; }
-          if(!amount || amount<=0){ skipped.push({row: rowNum, reason: "Invalid or missing Amount"}); return; }
+          if(!dateV){ invalid.push({row: rowNum, reason: "Invalid or missing Date"}); return; }
+          if(!party){ invalid.push({row: rowNum, reason: "Missing Party name"}); return; }
+          if(!type){ invalid.push({row: rowNum, reason: "Invalid or missing Type (use IN or OUT)"}); return; }
+          if(!amount || amount<=0){ invalid.push({row: rowNum, reason: "Invalid or missing Amount"}); return; }
 
-          const phone = String(phoneRaw||"").trim();
-          if(phone) setPartyPhone(comp.id, party, phone);
-
-          data.transactions.push({
-            id: uid(), companyId: comp.id, type, date: dateV, party,
-            amount, remark: String(remarkRaw||"").trim(),
-            createdAt: Date.now(), createdBy: currentUser.username
+          validRows.push({
+            rowNum, date: dateV, party, type, amount,
+            remark: String(remarkRaw||"").trim(),
+            phone: String(phoneRaw||"").trim()
           });
-          imported++;
         });
 
-        if(imported>0){
-          logActivity("Bulk imported "+imported+" transaction(s) from Excel"+(skipped.length?(", "+skipped.length+" row(s) skipped"):""));
-          save();
+        // ---- Duplicate & same-day/same-amount detection ----
+        const existingTx = companyTx(comp.id);
+        const existingKeys = new Set(existingTx.map(sameTxKey));
+        // Existing entries grouped by date+amount, for flagging "different party but same day+amount"
+        const existingByDateAmt = {};
+        existingTx.forEach(t=>{
+          const k = t.date+"|"+Number(t.amount);
+          if(!existingByDateAmt[k]) existingByDateAmt[k] = [];
+          existingByDateAmt[k].push(t);
+        });
+
+        const duplicates = [];
+        const autoRows = [];
+        const reviewRows = [];
+        const seenInFileKeys = new Set();
+        const seenInFileByDateAmt = {};
+
+        validRows.forEach(row=>{
+          const key = sameTxKey(row);
+          const dateAmtKey = row.date+"|"+Number(row.amount);
+
+          // Exact duplicate: same date+party+type+amount already exists, or repeated within this file
+          if(existingKeys.has(key) || seenInFileKeys.has(key)){
+            duplicates.push({row: row.rowNum, reason: "Duplicate — matches an existing "+row.party+" ("+row.type.toUpperCase()+" "+fmt(row.amount)+" on "+fmtDate(row.date)+") entry already in Rojmel"});
+            return;
+          }
+
+          // Same date + same amount as something else (existing tx or another row in this file) —
+          // could be a genuine separate transaction or an accidental duplicate. Ask user to verify.
+          const clashExisting = existingByDateAmt[dateAmtKey] || [];
+          const clashInFile = seenInFileByDateAmt[dateAmtKey] || [];
+          if(clashExisting.length>0 || clashInFile.length>0){
+            const clashDesc = clashExisting.length
+              ? "Existing entry: "+clashExisting[0].party+" ("+clashExisting[0].type.toUpperCase()+")"
+              : "Another row in this file: "+clashInFile[0].party+" ("+clashInFile[0].type.toUpperCase()+")";
+            reviewRows.push(Object.assign({}, row, {checked:true, clashDesc}));
+          } else {
+            autoRows.push(row);
+          }
+
+          seenInFileKeys.add(key);
+          if(!seenInFileByDateAmt[dateAmtKey]) seenInFileByDateAmt[dateAmtKey] = [];
+          seenInFileByDateAmt[dateAmtKey].push(row);
+        });
+
+        if(reviewRows.length === 0){
+          // Nothing needs manual verification — import straight away
+          finalizeImport(comp, autoRows, [], duplicates, invalid);
+        } else {
+          pendingImportReview = { companyId: comp.id, autoRows, reviewRows, duplicates, invalid };
+          lastImportSummary = null;
+          render();
         }
-        lastImportSummary = {imported, skipped};
-        render();
       }catch(err){
         alert("Could not read this file. Please make sure it's a valid Excel (.xlsx) file matching the template.");
       }
     };
     reader.readAsArrayBuffer(file);
+  }
+
+  function finalizeImport(comp, autoRows, confirmedReviewRows, duplicates, invalid){
+    const toImport = autoRows.concat(confirmedReviewRows);
+    toImport.forEach(row=>{
+      if(row.phone) setPartyPhone(comp.id, row.party, row.phone);
+      data.transactions.push({
+        id: uid(), companyId: comp.id, type: row.type, date: row.date, party: row.party,
+        amount: row.amount, remark: row.remark,
+        createdAt: Date.now(), createdBy: currentUser.username
+      });
+    });
+    const skippedReviewCount = (pendingImportReview ? pendingImportReview.reviewRows.length : 0) - confirmedReviewRows.length;
+    if(toImport.length>0){
+      logActivity("Bulk imported "+toImport.length+" transaction(s) from Excel"+
+        (duplicates.length ? (", "+duplicates.length+" duplicate(s) skipped") : "")+
+        (invalid.length ? (", "+invalid.length+" invalid row(s) skipped") : "")+
+        (skippedReviewCount>0 ? (", "+skippedReviewCount+" unverified row(s) skipped") : ""));
+      save();
+    } else if(duplicates.length || invalid.length){
+      save();
+    }
+    lastImportSummary = { imported: toImport.length, skipped: invalid, duplicates, reviewSkipped: skippedReviewCount };
+    pendingImportReview = null;
+    render();
+  }
+
+  function toggleReviewRow(idx){
+    if(!pendingImportReview) return;
+    pendingImportReview.reviewRows[idx].checked = !pendingImportReview.reviewRows[idx].checked;
+    render();
+  }
+
+  function cancelImportReview(){
+    pendingImportReview = null;
+    render();
+  }
+
+  function confirmImportReview(comp){
+    if(!pendingImportReview) return;
+    const confirmed = pendingImportReview.reviewRows.filter(r=>r.checked);
+    finalizeImport(comp, pendingImportReview.autoRows, confirmed, pendingImportReview.duplicates, pendingImportReview.invalid);
   }
 
   function renderExportBackup(screen, comp){
@@ -1005,19 +1097,73 @@
     icard.appendChild(importFileInput);
     screen.appendChild(icard);
 
+    // ---- Manual verification panel for same-day/same-amount rows ----
+    if(pendingImportReview && pendingImportReview.companyId === comp.id){
+      const pr = pendingImportReview;
+      const revCard = el("div",{class:"form-card", style:"max-width:700px;margin-top:12px;border-color:var(--mustard);"});
+      revCard.appendChild(el("div",{style:"font-weight:700;font-size:14.5px;margin-bottom:4px;color:var(--mustard);"},
+        "⚠ "+pr.reviewRows.length+" entr"+(pr.reviewRows.length===1?"y needs":"ies need")+" your verification"));
+      revCard.appendChild(el("div",{style:"font-size:12.5px;color:var(--ink-soft);margin-bottom:14px;"},
+        "These have the same date and amount as another entry (existing or in this file). Uncheck any that are accidental duplicates before importing. "+
+        pr.autoRows.length+" other row(s) have no conflict and will import automatically."));
+
+      pr.reviewRows.forEach((r, idx)=>{
+        const row = el("div",{style:"display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--paper-line);"});
+        const checkbox = el("input",{type:"checkbox"});
+        checkbox.checked = r.checked;
+        checkbox.style.marginTop = "3px";
+        checkbox.onchange = ()=> toggleReviewRow(idx);
+        row.appendChild(checkbox);
+        const info = el("div",{style:"flex:1;"});
+        info.appendChild(el("div",{style:"font-weight:600;font-size:13.5px;"},
+          r.party+" — "+r.type.toUpperCase()+" "+fmt(r.amount)+"  ("+fmtDate(r.date)+")"));
+        if(r.remark) info.appendChild(el("div",{style:"font-size:12px;color:var(--ink-soft);"}, r.remark));
+        info.appendChild(el("div",{style:"font-size:11.5px;color:var(--mustard);margin-top:2px;"}, "⚠ Clashes with: "+r.clashDesc));
+        row.appendChild(info);
+        revCard.appendChild(row);
+      });
+
+      const btnRow2 = el("div",{style:"display:flex;gap:10px;margin-top:14px;"});
+      const confirmBtn = el("button",{class:"btn-primary green", style:"flex:1;"},"✔ Import Checked Entries");
+      confirmBtn.onclick = ()=> confirmImportReview(comp);
+      const cancelBtn = el("button",{class:"btn-secondary", style:"flex:1;margin-top:0;color:var(--maroon);"},"✕ Cancel Import");
+      cancelBtn.onclick = cancelImportReview;
+      btnRow2.appendChild(confirmBtn); btnRow2.appendChild(cancelBtn);
+      revCard.appendChild(btnRow2);
+      screen.appendChild(revCard);
+    }
+
     if(lastImportSummary){
       const s = lastImportSummary;
+      const totalSkipped = (s.skipped?s.skipped.length:0) + (s.duplicates?s.duplicates.length:0) + (s.reviewSkipped||0);
       const resCard = el("div",{class:"form-card", style:"max-width:600px;margin-top:12px;"});
       resCard.appendChild(el("div",{style:"font-weight:700;font-size:14.5px;margin-bottom:8px;color:"+(s.imported>0?"var(--green)":"var(--maroon)")+";"},
-        "✔ "+s.imported+" transaction(s) imported"+(s.skipped.length?"   ·   ⚠ "+s.skipped.length+" row(s) skipped":"")));
-      if(s.skipped.length>0){
-        const list = el("div",{style:"font-size:12.5px;color:var(--ink-soft);max-height:180px;overflow-y:auto;"});
+        "✔ "+s.imported+" transaction(s) imported"+(totalSkipped?"   ·   ⚠ "+totalSkipped+" row(s) not imported":"")));
+
+      if(s.duplicates && s.duplicates.length>0){
+        resCard.appendChild(el("div",{style:"font-size:12.5px;font-weight:600;color:var(--maroon);margin:8px 0 4px 0;"}, "Skipped as duplicates ("+s.duplicates.length+"):"));
+        const dlist = el("div",{style:"font-size:12.5px;color:var(--ink-soft);max-height:160px;overflow-y:auto;"});
+        s.duplicates.slice(0,30).forEach(sk=>{
+          dlist.appendChild(el("div",{style:"padding:3px 0;border-bottom:1px solid var(--paper-line);"}, "Row "+sk.row+": "+sk.reason));
+        });
+        if(s.duplicates.length>30) dlist.appendChild(el("div",{style:"padding:3px 0;"}, "...and "+(s.duplicates.length-30)+" more"));
+        resCard.appendChild(dlist);
+      }
+
+      if(s.reviewSkipped>0){
+        resCard.appendChild(el("div",{style:"font-size:12.5px;color:var(--ink-soft);margin-top:8px;"}, "⚠ "+s.reviewSkipped+" row(s) you left unchecked during verification were not imported."));
+      }
+
+      if(s.skipped && s.skipped.length>0){
+        resCard.appendChild(el("div",{style:"font-size:12.5px;font-weight:600;color:var(--maroon);margin:8px 0 4px 0;"}, "Skipped — invalid data ("+s.skipped.length+"):"));
+        const list = el("div",{style:"font-size:12.5px;color:var(--ink-soft);max-height:160px;overflow-y:auto;"});
         s.skipped.slice(0,30).forEach(sk=>{
           list.appendChild(el("div",{style:"padding:3px 0;border-bottom:1px solid var(--paper-line);"}, "Row "+sk.row+": "+sk.reason));
         });
         if(s.skipped.length>30) list.appendChild(el("div",{style:"padding:3px 0;"}, "...and "+(s.skipped.length-30)+" more"));
         resCard.appendChild(list);
       }
+
       const dismissBtn = el("button",{class:"filter-chip", style:"margin-top:10px;"},"Dismiss");
       dismissBtn.onclick = ()=>{ lastImportSummary=null; render(); };
       resCard.appendChild(dismissBtn);
