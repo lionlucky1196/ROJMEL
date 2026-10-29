@@ -473,7 +473,7 @@
   let ledgerParty = null;
   let entryType = "in"; // in | out
   let editingTxId = null;
-  let overlay = null; // "entryChoice" | "companySwitch" | null
+  let overlay = null; // "entryChoice" | "companySwitch" | "copyTx" | null
   let searchQuery = "";
   let dateFilter = "all"; // all | today | month | custom
   let customDate = "";
@@ -486,6 +486,12 @@
   let loginError = "";
   let editingUserId = null;
   let advSearchQuery = "";
+
+  // ---- Copy to another company ----
+  let selectMode = false;
+  let selectedTxIds = new Set();
+  let copyTargetId = null;
+  let copyFlip = false;
 
   // ---- Ledger detail (party ledger) search & filter state ----
   let ldSearchQuery = "";
@@ -1234,6 +1240,7 @@
       const active = (view===id) || (id==="dashboard" && view==="dashboard");
       const btn = el("button",{class:"navitem"+(view===id?" active":"")}, [ic+"  "+label]);
       btn.onclick = ()=>{
+        selectMode = false; selectedTxIds = new Set();
         if(id==="entryIn"){ entryType="in"; editingTxId=null; view="entryForm"; }
         else if(id==="entryOut"){ entryType="out"; editingTxId=null; view="entryForm"; }
         else view = id;
@@ -1309,7 +1316,7 @@
     bnavDefs.forEach(([id,ic,label])=>{
       if(id==="__fab__"){ bnav.appendChild(el("div",{style:"width:52px"})); return; }
       const btn = el("button",{class:view===id?"active":""},[el("div",{class:"ic"},ic), el("div",{},label)]);
-      btn.onclick = ()=>{ view=id; render(); };
+      btn.onclick = ()=>{ selectMode=false; selectedTxIds=new Set(); view=id; render(); };
       bnav.appendChild(btn);
     });
     app.appendChild(bnav);
@@ -1322,6 +1329,7 @@
     if(overlay==="entryChoice") renderEntryChoiceOverlay(app);
     if(overlay==="companySwitch") renderCompanySwitchOverlay(app);
     if(overlay==="searchPdfChoice") renderSearchPdfChoiceOverlay(app, comp);
+    if(overlay==="copyTx") renderCopyTxOverlay(app, comp);
   }
 
   function renderDashboard(screen, comp, bal){
@@ -1366,9 +1374,10 @@
     }
   }
 
-  function txRow(t, showBalance, balMap, srNo){
+  // selectable=true -> row can be ticked when "Select & Copy" mode is ON (Cash Flow screen)
+  function txRow(t, showBalance, balMap, srNo, selectable){
     const row = el("div",{class:"row-card"});
-    row.onclick = ()=>{ editingTxId=t.id; entryType=t.type; view="entryForm"; render(); };
+    const selecting = selectable && selectMode;
     const left = el("div",{class:"row-left"},[
       el("div",{},[
         srNo!=null ? el("span",{class:"sr-no"}, "#"+srNo+"  ") : null,
@@ -1376,6 +1385,22 @@
       ]),
       el("div",{class:"sub"}, fmtDate(t.date) + (t.remark? " · "+t.remark : ""))
     ]);
+    if(selecting){
+      const cb = el("input",{type:"checkbox"});
+      cb.checked = selectedTxIds.has(t.id);
+      cb.style.cssText = "width:18px;height:18px;margin-right:12px;pointer-events:none;flex-shrink:0;";
+      row.onclick = ()=>{
+        if(selectedTxIds.has(t.id)) selectedTxIds.delete(t.id); else selectedTxIds.add(t.id);
+        cb.checked = selectedTxIds.has(t.id);
+        row.style.borderColor = cb.checked ? "var(--green)" : "";
+        updateSelBar();
+      };
+      if(cb.checked) row.style.borderColor = "var(--green)";
+      row.appendChild(el("div",{style:"display:flex;align-items:center;"},[cb, left]));
+    } else {
+      row.onclick = ()=>{ editingTxId=t.id; entryType=t.type; view="entryForm"; render(); };
+      row.appendChild(left);
+    }
     const right = el("div",{class:"row-right"});
     right.appendChild(el("div",{},[
       el("span",{class:"tag "+t.type}, t.type==="in"?"IN":"OUT"),
@@ -1383,8 +1408,74 @@
       el("span",{class:"amt "+t.type}, (t.type==="in"?"+":"-")+fmt(t.amount))
     ]));
     if(showBalance && balMap) right.appendChild(el("div",{class:"bal"}, "Balance "+fmt(balMap[t.id])));
-    row.appendChild(left); row.appendChild(right);
+    row.appendChild(right);
     return row;
+  }
+
+  // ---------------- Copy transactions to another company ----------------
+  function updateSelBar(){
+    const s = document.getElementById("sel-count");
+    if(s) s.textContent = selectedTxIds.size + " selected";
+  }
+
+  function copySelectedTx(fromComp){
+    const target = data.companies.find(c=>c.id===copyTargetId);
+    if(!target){ alert("Kontya company madhe copy karaychi te select kara"); return; }
+    const src = companyTx(fromComp.id)
+      .filter(t=>selectedTxIds.has(t.id))
+      .sort((a,b)=> a.date===b.date ? (a.createdAt-b.createdAt) : a.date.localeCompare(b.date));
+    if(src.length===0){ alert("Konti transaction select keleli nahi"); return; }
+
+    const existingKeys = new Set(companyTx(target.id).map(sameTxKey));
+    const base = Date.now();
+    let added = 0, dup = 0;
+    src.forEach((t,i)=>{
+      const type = copyFlip ? (t.type==="in" ? "out" : "in") : t.type;
+      const nt = {
+        id: uid(), companyId: target.id, type, date: t.date, party: t.party,
+        amount: t.amount, remark: t.remark || "",
+        createdAt: base + i, createdBy: currentUser.username
+      };
+      if(existingKeys.has(sameTxKey(nt))){ dup++; return; } // already aahe -> skip
+      data.transactions.push(nt);
+      existingKeys.add(sameTxKey(nt));
+      const ph = getPartyPhone(fromComp.id, t.party);
+      if(ph && !getPartyPhone(target.id, t.party)) setPartyPhone(target.id, t.party, ph);
+      added++;
+    });
+    logActivity("Copied "+added+" transaction(s) from "+fromComp.name+" to "+target.name+(copyFlip?" (IN/OUT reversed)":"")+(dup?", "+dup+" duplicate(s) skipped":""));
+    save();
+    alert(added+" transaction(s) copy zali"+(dup?"\n"+dup+" duplicate hoti, skip keli.":""));
+    overlay = null; selectMode = false; selectedTxIds = new Set(); copyTargetId = null; copyFlip = false;
+    render();
+  }
+
+  function renderCopyTxOverlay(app, comp){
+    const ov = el("div",{class:"overlay center"});
+    ov.onclick = (e)=>{ if(e.target===ov){ overlay=null; render(); } };
+    const sheet = el("div",{class:"sheet"});
+    sheet.appendChild(el("h2",{}, "Copy "+selectedTxIds.size+" transaction(s) to..."));
+    data.companies.filter(c=>c.id!==comp.id).forEach(c=>{
+      const item = el("div",{class:"company-list-item"+(c.id===copyTargetId?" selected":"")});
+      item.appendChild(el("div",{class:"name"}, c.name));
+      item.onclick = ()=>{ copyTargetId = c.id; render(); };
+      sheet.appendChild(item);
+    });
+    const flipWrap = el("label",{style:"display:flex;align-items:center;gap:8px;margin:14px 0;font-size:14px;"});
+    const flipCb = el("input",{type:"checkbox"});
+    flipCb.checked = copyFlip;
+    flipCb.onchange = (e)=>{ copyFlip = e.target.checked; };
+    flipWrap.appendChild(flipCb);
+    flipWrap.appendChild(document.createTextNode("IN ↔ OUT ulta kara (ithe OUT = tithe IN)"));
+    sheet.appendChild(flipWrap);
+    const go = el("button",{class:"btn-primary green"},"📋 Copy Now");
+    go.onclick = ()=> copySelectedTx(comp);
+    sheet.appendChild(go);
+    const cancel = el("button",{class:"btn-secondary"},"Cancel");
+    cancel.onclick = ()=>{ overlay=null; render(); };
+    sheet.appendChild(cancel);
+    ov.appendChild(sheet);
+    app.appendChild(ov);
   }
 
   function renderCashflow(screen, comp){
@@ -1420,6 +1511,33 @@
     };
     screen.appendChild(pdfBtn);
 
+    // ---- Select & Copy to another company ----
+    const selBtn = el("button",{class:"action-btn ghost", style:"width:100%;margin-bottom:12px;"},
+      selectMode ? "✕ Select Mode Band Kara" : "☑ Select & Copy to Another Company");
+    selBtn.onclick = ()=>{ selectMode = !selectMode; selectedTxIds = new Set(); render(); };
+    screen.appendChild(selBtn);
+
+    if(selectMode){
+      const bar = el("div",{style:"display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;padding:10px 12px;background:var(--mustard-soft);border:1px solid var(--mustard);border-radius:12px;"});
+      bar.appendChild(el("div",{id:"sel-count", style:"font-weight:700;font-size:14px;flex:1;min-width:90px;"}, selectedTxIds.size+" selected"));
+      const allBtn = el("button",{class:"filter-chip"},"Select All");
+      allBtn.onclick = ()=>{
+        filteredCompanyTx(comp.id).forEach(t=>selectedTxIds.add(t.id));
+        render();
+      };
+      const clrBtn = el("button",{class:"filter-chip"},"Clear");
+      clrBtn.onclick = ()=>{ selectedTxIds = new Set(); render(); };
+      const copyBtn = el("button",{class:"filter-chip active"},"📋 Copy to...");
+      copyBtn.onclick = ()=>{
+        if(selectedTxIds.size===0){ alert("Adhi transactions select kara"); return; }
+        if(data.companies.length<2){ alert("Dusri company nahi. Adhi Company madhe nvin company add kara."); return; }
+        copyTargetId = null; copyFlip = false;
+        overlay = "copyTx"; render();
+      };
+      bar.appendChild(allBtn); bar.appendChild(clrBtn); bar.appendChild(copyBtn);
+      screen.appendChild(bar);
+    }
+
     const listWrap = el("div",{id:"cf-list"});
     screen.appendChild(listWrap);
     fillCashflowList(listWrap, comp);
@@ -1438,7 +1556,7 @@
       container.appendChild(el("div",{class:"empty-state"},[el("div",{class:"big"},"🔍"), el("div",{class:"msg"},"No transactions found.")]));
       return;
     }
-    tx.forEach((t,i)=> container.appendChild(txRow(t, true, balMap, i+1)));
+    tx.forEach((t,i)=> container.appendChild(txRow(t, true, balMap, i+1, true)));
   }
 
   function dayTotalsMap(companyId, year, month){
@@ -2209,7 +2327,7 @@
       const b = computeBalance(c.id);
       const item = el("div",{class:"company-list-item"+(c.id===data.activeCompanyId?" selected":"")});
       item.appendChild(el("div",{},[el("div",{class:"name"},c.name), el("div",{class:"bal"},"Balance: "+fmt(b.balance))]));
-      item.onclick = ()=>{ data.activeCompanyId=c.id; save(); overlay=null; view="dashboard"; render(); };
+      item.onclick = ()=>{ selectMode=false; selectedTxIds=new Set(); data.activeCompanyId=c.id; save(); overlay=null; view="dashboard"; render(); };
       sheet.appendChild(item);
     });
     const addBtn = el("button",{class:"action-btn ghost", style:"width:100%;margin-top:6px;"},"+ Add New Company");
